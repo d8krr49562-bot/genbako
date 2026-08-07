@@ -1,0 +1,8 @@
+{
+  "name": "現場帳",
+  "short_name": "現場帳",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1C1F26",
+  "theme_color": "#1C1F26"
+}

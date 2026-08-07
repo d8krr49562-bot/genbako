@@ -1,0 +1,634 @@
+import React, { useState, useEffect, useMemo } from "react";
+import { Plus, ChevronLeft, ChevronRight, X, Check, FileText, Pencil, Loader2, Trash2, Zap } from "lucide-react";
+
+const yen = (n) => `¥${Number(n || 0).toLocaleString()}`;
+const pad = (n) => String(n).padStart(2, "0");
+const keyOf = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
+const monthKey = (y, m) => `${y}-${pad(m)}`;
+const todayObj = new Date();
+
+const STORAGE_KEY = "invoice-app-data-v2";
+
+// 1件分の仕事の合計金額
+const jobTotal = (j) => (j.ninku || 0) + (j.overtimeAmount || 0) + (j.transport || 0);
+// その日全体(複数件)の合計金額
+const dayTotal = (jobs) => (jobs || []).reduce((s, j) => s + jobTotal(j), 0);
+
+const emptyJob = () => ({
+  company: "", ninku: 0, overtimeMode: "time", overtimeMin: 0,
+  overtimeRatePerHour: 2500, overtimeAmount: 0, transport: 0, memo: "",
+});
+
+export default function InvoiceApp() {
+  const [year, setYear] = useState(todayObj.getFullYear());
+  const [month, setMonth] = useState(todayObj.getMonth() + 1);
+  const [view, setView] = useState("calendar"); // calendar | dayJobs | jobEdit | invoice
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [editingIndex, setEditingIndex] = useState(null); // どの仕事を編集中か(nullなら新規追加)
+  const [peekDate, setPeekDate] = useState(null);
+
+  const [entries, setEntries] = useState({}); // { "2026-08-07": [job, job, ...] }
+  const [companies, setCompanies] = useState(["A社", "B社"]);
+  const [ninkuPresets, setNinkuPresets] = useState([25000, 20000, 18000]);
+  const [comboPresets, setComboPresets] = useState([]); // セットプリセット
+
+  const [loading, setLoading] = useState(true);
+  const [saveStatus, setSaveStatus] = useState("idle");
+  const [saveError, setSaveError] = useState("");
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const data = JSON.parse(raw);
+        setEntries(data.entries || {});
+        setCompanies(data.companies || ["A社", "B社"]);
+        setNinkuPresets(data.ninkuPresets || [25000, 20000, 18000]);
+        setComboPresets(data.comboPresets || []);
+      }
+    } catch (e) {
+      // 初回起動、または読み込み失敗。初期状態のまま進める
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    setSaveStatus("saving");
+    try {
+      const payload = JSON.stringify({ entries, companies, ninkuPresets, comboPresets });
+      localStorage.setItem(STORAGE_KEY, payload);
+      setSaveStatus("saved");
+    } catch (e) {
+      setSaveStatus("error");
+      setSaveError(e && e.message ? e.message : String(e));
+    }
+  }, [entries, companies, ninkuPresets, comboPresets, loading]);
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const firstWeekday = new Date(year, month - 1, 1).getDay();
+
+  const monthTotal = useMemo(() => {
+    let t = 0;
+    Object.entries(entries).forEach(([k, jobs]) => {
+      if (k.startsWith(monthKey(year, month))) t += dayTotal(jobs);
+    });
+    return t;
+  }, [entries, year, month]);
+
+  const changeMonth = (delta) => {
+    let m = month + delta, y = year;
+    if (m > 12) { m = 1; y++; }
+    if (m < 1) { m = 12; y--; }
+    setMonth(m); setYear(y); setPeekDate(null);
+  };
+
+  const tapDay = (k) => setPeekDate((prev) => (prev === k ? null : k));
+
+  const openDayJobs = (k) => { setSelectedDate(k); setView("dayJobs"); };
+
+  const addJobToDay = (dateKey, job) => {
+    setEntries((prev) => {
+      const list = prev[dateKey] ? [...prev[dateKey]] : [];
+      list.push(job);
+      return { ...prev, [dateKey]: list };
+    });
+  };
+  const updateJobInDay = (dateKey, idx, job) => {
+    setEntries((prev) => {
+      const list = prev[dateKey] ? [...prev[dateKey]] : [];
+      list[idx] = job;
+      return { ...prev, [dateKey]: list };
+    });
+  };
+  const removeJobFromDay = (dateKey, idx) => {
+    setEntries((prev) => {
+      const list = (prev[dateKey] || []).filter((_, i) => i !== idx);
+      return { ...prev, [dateKey]: list };
+    });
+  };
+
+  const addComboPreset = (job) => {
+    setComboPresets((prev) => [...prev, { ...job, id: Date.now() }]);
+  };
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#1C1F26", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Loader2 size={28} color="#F5A623" style={{ animation: "spin 1s linear infinite" }} />
+        <style>{`@keyframes spin { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }`}</style>
+      </div>
+    );
+  }
+
+  if (view === "dayJobs" && selectedDate) {
+    return (
+      <DayJobsView
+        dateKey={selectedDate}
+        jobs={entries[selectedDate] || []}
+        comboPresets={comboPresets}
+        onBack={() => { setView("calendar"); setPeekDate(selectedDate); }}
+        onAddQuick={(preset) => {
+          const { id, ...job } = preset;
+          addJobToDay(selectedDate, { ...job });
+        }}
+        onOpenNew={() => { setEditingIndex(null); setView("jobEdit"); }}
+        onOpenEdit={(idx) => { setEditingIndex(idx); setView("jobEdit"); }}
+        onRemove={(idx) => removeJobFromDay(selectedDate, idx)}
+      />
+    );
+  }
+
+  if (view === "jobEdit" && selectedDate) {
+    const jobs = entries[selectedDate] || [];
+    const initial = editingIndex !== null ? jobs[editingIndex] : emptyJob();
+    return (
+      <JobDetail
+        dateKey={selectedDate}
+        job={initial}
+        onSave={(job) => {
+          if (editingIndex !== null) updateJobInDay(selectedDate, editingIndex, job);
+          else addJobToDay(selectedDate, job);
+          setView("dayJobs");
+        }}
+        onBack={() => setView("dayJobs")}
+        companies={companies}
+        setCompanies={setCompanies}
+        ninkuPresets={ninkuPresets}
+        setNinkuPresets={setNinkuPresets}
+        onSaveCombo={addComboPreset}
+        comboPresets={comboPresets}
+      />
+    );
+  }
+
+  if (view === "invoice") {
+    return <InvoiceView year={year} month={month} entries={entries} onBack={() => setView("calendar")} />;
+  }
+
+  const peekJobs = peekDate ? (entries[peekDate] || []) : [];
+  const peekHasData = peekJobs.length > 0;
+  const peekTotal = dayTotal(peekJobs);
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#1C1F26", fontFamily: "'Zen Kaku Gothic New','Hiragino Sans',sans-serif" }}>
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "20px 16px 40px" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
+          <h1 style={{ color: "#F5A623", fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: 0.5 }}>現場帳</h1>
+          <SaveIndicator status={saveStatus} error={saveError} />
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#242832", borderRadius: 14, padding: "10px 14px", marginTop: 16, border: "1px solid #333846" }}>
+          <button onClick={() => changeMonth(-1)} style={iconBtnStyle}><ChevronLeft size={20} color="#F5A623" /></button>
+          <div style={{ color: "#fff", fontSize: 17, fontWeight: 700 }}>{year}年 {month}月</div>
+          <button onClick={() => changeMonth(1)} style={iconBtnStyle}><ChevronRight size={20} color="#F5A623" /></button>
+        </div>
+
+        <button
+          onClick={() => setView("invoice")}
+          style={{ marginTop: 12, width: "100%", textAlign: "left", cursor: "pointer", background: "linear-gradient(135deg,#F5A623,#E8871E)", border: "none", borderRadius: 14, padding: "14px 18px" }}
+        >
+          <div style={{ color: "#3A2A08", fontSize: 12, fontWeight: 700 }}>今月の合計（タップで請求内容を確認）</div>
+          <div style={{ color: "#1C1F26", fontSize: 26, fontWeight: 800 }}>{yen(monthTotal)}</div>
+        </button>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", marginTop: 20, marginBottom: 6 }}>
+          {["日", "月", "火", "水", "木", "金", "土"].map((d, i) => (
+            <div key={d} style={{ textAlign: "center", fontSize: 11, color: i === 0 ? "#E85D5D" : i === 6 ? "#5D9CE8" : "#8A8F9C", fontWeight: 700 }}>{d}</div>
+          ))}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6 }}>
+          {Array.from({ length: firstWeekday }).map((_, i) => <div key={"empty" + i} />)}
+          {Array.from({ length: daysInMonth }).map((_, i) => {
+            const day = i + 1;
+            const k = keyOf(year, month, day);
+            const jobs = entries[k] || [];
+            const hasData = jobs.length > 0;
+            const total = dayTotal(jobs);
+            const isToday = year === todayObj.getFullYear() && month === todayObj.getMonth() + 1 && day === todayObj.getDate();
+            const isPeeking = peekDate === k;
+            return (
+              <button
+                key={day}
+                onClick={() => tapDay(k)}
+                style={{
+                  aspectRatio: "1", borderRadius: 10,
+                  border: isPeeking ? "1.5px solid #F5A623" : isToday ? "1.5px solid #6B7280" : "1px solid #2E323C",
+                  background: isPeeking ? "rgba(245,166,35,0.18)" : hasData ? "#2E3A2E" : "#242832",
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  cursor: "pointer", padding: 2, gap: 1, position: "relative",
+                }}
+              >
+                <span style={{ color: isPeeking ? "#F5A623" : hasData ? "#8FD19E" : "#C7CBD4", fontSize: 13, fontWeight: isToday || isPeeking ? 800 : 600 }}>{day}</span>
+                {hasData && <span style={{ color: isPeeking ? "#F5A623" : "#8FD19E", fontSize: 8, fontWeight: 700 }}>{total >= 10000 ? `${Math.round(total / 1000)}k` : total}</span>}
+                {jobs.length > 1 && (
+                  <span style={{ position: "absolute", top: 2, right: 2, background: "#F5A623", color: "#1C1F26", fontSize: 7, fontWeight: 800, borderRadius: 6, padding: "0 3px" }}>
+                    {jobs.length}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {peekDate && (
+          <div style={{ marginTop: 14, background: "#242832", border: "1px solid #F5A623", borderRadius: 14, padding: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: peekHasData ? 10 : 0 }}>
+              <span style={{ color: "#fff", fontSize: 14, fontWeight: 800 }}>{month}月{Number(peekDate.split("-")[2])}日</span>
+              <span style={{ color: "#F5A623", fontSize: 16, fontWeight: 800 }}>{yen(peekTotal)}</span>
+            </div>
+            {peekHasData && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                {peekJobs.map((j, idx) => (
+                  <div key={idx} style={{ display: "flex", justifyContent: "space-between", background: "#1C1F26", borderRadius: 8, padding: "6px 10px" }}>
+                    <span style={{ color: "#C7CBD4", fontSize: 12 }}>{j.company || "未設定"}</span>
+                    <span style={{ color: "#8FD19E", fontSize: 12, fontWeight: 700 }}>{yen(jobTotal(j))}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={() => openDayJobs(peekDate)}
+              style={{ width: "100%", background: "#F5A623", border: "none", borderRadius: 10, padding: "10px", color: "#1C1F26", fontSize: 13, fontWeight: 800, cursor: "pointer" }}
+            >
+              {peekHasData ? "詳しく見る・修正する" : "入力する"}
+            </button>
+          </div>
+        )}
+
+        <p style={{ color: "#5A5F6B", fontSize: 11, textAlign: "center", marginTop: 20 }}>
+          日付をタップするとその場で金額を確認できます。1日に複数件の仕事も追加できます。
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SaveIndicator({ status, error }) {
+  const map = {
+    idle: { text: "", color: "#5A5F6B" },
+    saving: { text: "保存中…", color: "#8A8F9C" },
+    saved: { text: "保存済み", color: "#8FD19E" },
+    error: { text: "保存に失敗", color: "#E85D5D" },
+  };
+  const s = map[status] || map.idle;
+  if (!s.text) return <span />;
+  return <span style={{ color: s.color, fontSize: 11, fontWeight: 600 }} title={error || ""}>{s.text}</span>;
+}
+
+const iconBtnStyle = { background: "transparent", border: "none", padding: 6, cursor: "pointer", display: "flex" };
+
+// ------------------- その日の仕事一覧画面 -------------------
+function DayJobsView({ dateKey, jobs, comboPresets, onBack, onAddQuick, onOpenNew, onOpenEdit, onRemove }) {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const total = dayTotal(jobs);
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#1C1F26", fontFamily: "'Zen Kaku Gothic New','Hiragino Sans',sans-serif" }}>
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 16px 60px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+          <button onClick={onBack} style={iconBtnStyle}><ChevronLeft size={22} color="#F5A623" /></button>
+          <div>
+            <div style={{ color: "#fff", fontSize: 18, fontWeight: 800 }}>{m}月{d}日</div>
+            <div style={{ color: "#6B7280", fontSize: 11 }}>{y}年</div>
+          </div>
+        </div>
+
+        {comboPresets.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ color: "#8A8F9C", fontSize: 12, fontWeight: 700, marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
+              <Zap size={13} color="#F5A623" /> ワンタップで追加
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {comboPresets.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => onAddQuick(p)}
+                  style={{
+                    padding: "10px 14px", borderRadius: 12, border: "1px solid #F5A623",
+                    background: "rgba(245,166,35,0.1)", color: "#F5A623", fontSize: 12, fontWeight: 700,
+                    cursor: "pointer", textAlign: "left", display: "flex", flexDirection: "column", gap: 2,
+                  }}
+                >
+                  <span>{p.company || "会社未設定"}</span>
+                  <span style={{ color: "#C7CBD4", fontWeight: 500, fontSize: 11 }}>{yen(jobTotal(p))}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ color: "#8A8F9C", fontSize: 12, fontWeight: 700, marginBottom: 8 }}>この日の仕事（{jobs.length}件）</div>
+
+        {jobs.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "24px 0", color: "#5A5F6B", fontSize: 13 }}>まだ入力がありません</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+            {jobs.map((j, idx) => (
+              <div key={idx} style={{ background: "#242832", border: "1px solid #333846", borderRadius: 12, padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <button onClick={() => onOpenEdit(idx)} style={{ background: "none", border: "none", textAlign: "left", flex: 1, cursor: "pointer", padding: 0 }}>
+                  <div style={{ color: "#fff", fontSize: 14, fontWeight: 700 }}>{j.company || "未設定"}</div>
+                  <div style={{ color: "#6B7280", fontSize: 11, marginTop: 2 }}>人工{yen(j.ninku)} ／ 残業{yen(j.overtimeAmount)} ／ 諸経費{yen(j.transport)}</div>
+                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ color: "#F5A623", fontSize: 14, fontWeight: 800 }}>{yen(jobTotal(j))}</span>
+                  <button onClick={() => onRemove(idx)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+                    <Trash2 size={15} color="#5A5F6B" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          onClick={onOpenNew}
+          style={{ width: "100%", background: "#242832", border: "1px dashed #F5A623", borderRadius: 12, padding: "12px", color: "#F5A623", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+        >
+          <Plus size={16} /> 仕事を追加する
+        </button>
+
+        <div style={{ marginTop: 18, background: "linear-gradient(135deg,#F5A623,#E8871E)", borderRadius: 14, padding: "14px 18px" }}>
+          <div style={{ color: "#3A2A08", fontSize: 12, fontWeight: 700 }}>この日の合計</div>
+          <div style={{ color: "#1C1F26", fontSize: 24, fontWeight: 800 }}>{yen(total)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ------------------- 1件分の入力/編集画面 -------------------
+function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, ninkuPresets, setNinkuPresets, onSaveCombo, comboPresets }) {
+  const [company, setCompany] = useState(job.company || "");
+  const [ninku, setNinku] = useState(job.ninku || 0);
+  const [overtimeMode, setOvertimeMode] = useState(job.overtimeMode || "time");
+  const [overtimeMinStr, setOvertimeMinStr] = useState(job.overtimeMin ? String(job.overtimeMin) : "");
+  const [overtimeRateStr, setOvertimeRateStr] = useState(job.overtimeRatePerHour ? String(job.overtimeRatePerHour) : "2500");
+  const [overtimeManual, setOvertimeManual] = useState(job.overtimeAmount || 0);
+  const [transport, setTransport] = useState(job.transport || 0);
+  const [memo, setMemo] = useState(job.memo || "");
+
+  const [showAddCompany, setShowAddCompany] = useState(false);
+  const [newCompanyName, setNewCompanyName] = useState("");
+  const [showAddNinku, setShowAddNinku] = useState(false);
+  const [newNinkuValue, setNewNinkuValue] = useState("");
+  const [comboSaved, setComboSaved] = useState(false);
+
+  const overtimeMin = Number(overtimeMinStr || 0);
+  const overtimeRatePerHour = Number(overtimeRateStr || 0);
+  const overtimeAmount = overtimeMode === "time" ? Math.round((overtimeMin / 60) * overtimeRatePerHour) : Number(overtimeManual || 0);
+  const total = Number(ninku || 0) + overtimeAmount + Number(transport || 0);
+  const [y, m, d] = dateKey.split("-").map(Number);
+
+  const currentJob = () => ({ company, ninku: Number(ninku), overtimeMode, overtimeMin, overtimeRatePerHour, overtimeAmount, transport: Number(transport), memo: "" });
+
+  const isDuplicateCombo = comboPresets.some((p) =>
+    p.company === company && Number(p.ninku) === Number(ninku) && p.overtimeMode === overtimeMode &&
+    Number(p.overtimeMin) === overtimeMin && Number(p.overtimeRatePerHour) === overtimeRatePerHour &&
+    Number(p.transport) === Number(transport)
+  );
+
+  const save = () => onSave({ company, ninku: Number(ninku), overtimeMode, overtimeMin, overtimeRatePerHour, overtimeAmount, transport: Number(transport), memo });
+
+  const addCompany = () => { if (!newCompanyName.trim()) return; setCompany(newCompanyName.trim()); setShowAddCompany(false); setNewCompanyName(""); };
+  const registerCompanyPreset = () => { if (company && !companies.includes(company)) setCompanies([...companies, company]); };
+  const addNinku = () => { const v = Number(newNinkuValue); if (!v) return; setNinku(v); setShowAddNinku(false); setNewNinkuValue(""); };
+  const registerNinkuPreset = () => { if (ninku && !ninkuPresets.includes(Number(ninku))) setNinkuPresets([...ninkuPresets, Number(ninku)]); };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#1C1F26", fontFamily: "'Zen Kaku Gothic New','Hiragino Sans',sans-serif" }}>
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 16px 60px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+          <button onClick={onBack} style={iconBtnStyle}><ChevronLeft size={22} color="#F5A623" /></button>
+          <div>
+            <div style={{ color: "#fff", fontSize: 18, fontWeight: 800 }}>{m}月{d}日 の仕事を入力</div>
+            <div style={{ color: "#6B7280", fontSize: 11 }}>{y}年</div>
+          </div>
+        </div>
+
+        <Section label="会社">
+          <ChipRow>
+            {companies.map((c) => <Chip key={c} active={company === c} onClick={() => setCompany(c)}>{c}</Chip>)}
+            <Chip onClick={() => setShowAddCompany(true)} isAdd><Plus size={14} /></Chip>
+          </ChipRow>
+          {company && !companies.includes(company) && <PresetPrompt label={`「${company}」をプリセットに追加する？`} onYes={registerCompanyPreset} />}
+          <ManualInput placeholder="会社名を直接入力" value={company} onChange={setCompany} />
+        </Section>
+
+        <Section label="人工（1日あたり）">
+          <ChipRow>
+            {ninkuPresets.map((v) => <Chip key={v} active={Number(ninku) === v} onClick={() => setNinku(v)}>{yen(v)}</Chip>)}
+            <Chip onClick={() => setShowAddNinku(true)} isAdd><Plus size={14} /></Chip>
+          </ChipRow>
+          {ninku && !ninkuPresets.includes(Number(ninku)) && <PresetPrompt label={`「${yen(ninku)}」をプリセットに追加する？`} onYes={registerNinkuPreset} />}
+          <ManualInput placeholder="金額を直接入力" value={ninku === 0 ? "" : String(ninku)} onChange={(v) => setNinku(v.replace(/[^0-9]/g, ""))} numeric />
+        </Section>
+
+        <Section label="残業代">
+          <ChipRow>
+            <Chip active={overtimeMode === "time"} onClick={() => setOvertimeMode("time")}>時間で計算</Chip>
+            <Chip active={overtimeMode === "manual"} onClick={() => setOvertimeMode("manual")}>金額を直接入力</Chip>
+          </ChipRow>
+          {overtimeMode === "time" ? (
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <LabeledField label="時間(分)">
+                <input type="text" inputMode="numeric" value={overtimeMinStr} placeholder="0" onChange={(e) => setOvertimeMinStr(e.target.value.replace(/[^0-9]/g, ""))} style={inputStyle} />
+              </LabeledField>
+              <LabeledField label="時給換算(円/時)">
+                <input type="text" inputMode="numeric" value={overtimeRateStr} placeholder="0" onChange={(e) => setOvertimeRateStr(e.target.value.replace(/[^0-9]/g, ""))} style={inputStyle} />
+              </LabeledField>
+            </div>
+          ) : (
+            <ManualInput placeholder="残業代の金額" value={overtimeManual === 0 ? "" : String(overtimeManual)} onChange={(v) => setOvertimeManual(v.replace(/[^0-9]/g, ""))} numeric />
+          )}
+          <div style={{ color: "#8A8F9C", fontSize: 12, marginTop: 6 }}>→ 残業代 {yen(overtimeAmount)}</div>
+        </Section>
+
+        <Section label="交通費・諸経費">
+          <ManualInput placeholder="交通費など" value={transport === 0 ? "" : String(transport)} onChange={(v) => setTransport(v.replace(/[^0-9]/g, ""))} numeric />
+        </Section>
+
+        <Section label="メモ（任意）">
+          <textarea value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="現場の内容など" style={{ ...inputStyle, width: "100%", minHeight: 60, resize: "vertical", boxSizing: "border-box" }} />
+        </Section>
+
+        {company && ninku > 0 && !isDuplicateCombo && !comboSaved && (
+          <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between", background: "#2A2E38", border: "1px dashed #F5A623", borderRadius: 10, padding: "10px 12px" }}>
+            <span style={{ color: "#F5A623", fontSize: 12, fontWeight: 600 }}>この組み合わせをワンタップ用に登録する？</span>
+            <button
+              onClick={() => { onSaveCombo(currentJob()); setComboSaved(true); }}
+              style={{ background: "#F5A623", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 700, color: "#1C1F26", cursor: "pointer" }}
+            >
+              登録
+            </button>
+          </div>
+        )}
+        {comboSaved && <div style={{ marginTop: 10, color: "#8FD19E", fontSize: 11 }}>✓ ワンタップ用に登録しました</div>}
+
+        <div style={{ marginTop: 18, background: "linear-gradient(135deg,#F5A623,#E8871E)", borderRadius: 14, padding: "14px 18px" }}>
+          <div style={{ color: "#3A2A08", fontSize: 12, fontWeight: 700 }}>この件の合計</div>
+          <div style={{ color: "#1C1F26", fontSize: 24, fontWeight: 800 }}>{yen(total)}</div>
+        </div>
+
+        <button onClick={save} style={{ marginTop: 16, width: "100%", background: "#F5A623", border: "none", borderRadius: 12, padding: "14px", color: "#1C1F26", fontSize: 15, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer" }}>
+          <Check size={18} />保存する
+        </button>
+      </div>
+
+      {showAddCompany && (
+        <Modal onClose={() => setShowAddCompany(false)}>
+          <div style={{ color: "#fff", fontSize: 15, fontWeight: 700, marginBottom: 10 }}>会社を追加</div>
+          <input autoFocus value={newCompanyName} onChange={(e) => setNewCompanyName(e.target.value)} placeholder="会社名" style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }} />
+          <button onClick={addCompany} style={modalBtnStyle}>決定</button>
+        </Modal>
+      )}
+      {showAddNinku && (
+        <Modal onClose={() => setShowAddNinku(false)}>
+          <div style={{ color: "#fff", fontSize: 15, fontWeight: 700, marginBottom: 10 }}>人工の金額を追加</div>
+          <input autoFocus type="number" value={newNinkuValue} onChange={(e) => setNewNinkuValue(e.target.value)} placeholder="例: 22000" style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }} />
+          <button onClick={addNinku} style={modalBtnStyle}>決定</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ------------------- 請求内容確認画面 -------------------
+function InvoiceView({ year, month, entries, onBack }) {
+  const rows = useMemo(() => {
+    const out = [];
+    Object.entries(entries)
+      .filter(([k]) => k.startsWith(monthKey(year, month)))
+      .sort(([a], [b]) => a.localeCompare(b))
+      .forEach(([k, jobs]) => {
+        (jobs || []).forEach((j) => {
+          out.push({ date: k, day: Number(k.split("-")[2]), company: j.company || "-", ninku: j.ninku || 0, overtime: j.overtimeAmount || 0, transport: j.transport || 0, total: jobTotal(j) });
+        });
+      });
+    return out;
+  }, [entries, year, month]);
+
+  const grandTotal = rows.reduce((s, r) => s + r.total, 0);
+  const byCompany = useMemo(() => {
+    const map = {};
+    rows.forEach((r) => { map[r.company] = (map[r.company] || 0) + r.total; });
+    return Object.entries(map);
+  }, [rows]);
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#1C1F26", fontFamily: "'Zen Kaku Gothic New','Hiragino Sans',sans-serif" }}>
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 16px 60px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+          <button onClick={onBack} style={iconBtnStyle}><ChevronLeft size={22} color="#F5A623" /></button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <FileText size={18} color="#F5A623" />
+            <div style={{ color: "#fff", fontSize: 17, fontWeight: 800 }}>{year}年{month}月 請求内容の確認</div>
+          </div>
+        </div>
+
+        {rows.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "40px 0", color: "#5A5F6B" }}>この月の入力はまだありません</div>
+        ) : (
+          <>
+            <div style={{ background: "linear-gradient(135deg,#F5A623,#E8871E)", borderRadius: 14, padding: "16px 18px", marginBottom: 16 }}>
+              <div style={{ color: "#3A2A08", fontSize: 12, fontWeight: 700 }}>請求合計</div>
+              <div style={{ color: "#1C1F26", fontSize: 28, fontWeight: 800 }}>{yen(grandTotal)}</div>
+            </div>
+            {byCompany.length > 1 && (
+              <div style={{ background: "#242832", border: "1px solid #333846", borderRadius: 12, padding: 14, marginBottom: 16 }}>
+                <div style={{ color: "#8A8F9C", fontSize: 11, fontWeight: 700, marginBottom: 8 }}>会社別 小計</div>
+                {byCompany.map(([c, t]) => (
+                  <div key={c} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0" }}>
+                    <span style={{ color: "#C7CBD4", fontSize: 13 }}>{c}</span>
+                    <span style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>{yen(t)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ color: "#8A8F9C", fontSize: 11, fontWeight: 700, marginBottom: 8 }}>明細（{rows.length}件）</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {rows.map((r, i) => (
+                <div key={i} style={{ background: "#242832", border: "1px solid #333846", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>{month}月{r.day}日　{r.company}</div>
+                    <div style={{ color: "#6B7280", fontSize: 11 }}>人工{yen(r.ninku)} ／ 残業{yen(r.overtime)} ／ 諸経費{yen(r.transport)}</div>
+                  </div>
+                  <div style={{ color: "#F5A623", fontSize: 14, fontWeight: 800 }}>{yen(r.total)}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        <button disabled style={{ marginTop: 24, width: "100%", background: "#242832", border: "1px solid #3A3F4A", borderRadius: 12, padding: "13px", color: "#5A5F6B", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "not-allowed" }}>
+          PDFで出力する（準備中）
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Section({ label, children }) {
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div style={{ color: "#8A8F9C", fontSize: 12, fontWeight: 700, marginBottom: 8 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+function ChipRow({ children }) { return <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{children}</div>; }
+function Chip({ children, active, onClick, isAdd }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: isAdd ? "8px 10px" : "8px 14px", borderRadius: 20,
+      border: active ? "1.5px solid #F5A623" : "1px solid #333846",
+      background: active ? "rgba(245,166,35,0.15)" : "#242832",
+      color: active ? "#F5A623" : "#C7CBD4", fontSize: 13, fontWeight: active ? 700 : 500,
+      cursor: "pointer", display: "flex", alignItems: "center",
+    }}>{children}</button>
+  );
+}
+function ManualInput({ placeholder, value, onChange, numeric }) {
+  return (
+    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+      <Pencil size={13} color="#5A5F6B" />
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} inputMode={numeric ? "numeric" : "text"} style={{ ...inputStyle, flex: 1 }} />
+    </div>
+  );
+}
+function LabeledField({ label, children }) {
+  return (
+    <div style={{ flex: 1 }}>
+      <div style={{ color: "#5A5F6B", fontSize: 10, marginBottom: 4 }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+function PresetPrompt({ label, onYes }) {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+  return (
+    <div style={{ marginTop: 8, display: "flex", alignItems: "center", justifyContent: "space-between", background: "#2A2E38", border: "1px dashed #444A58", borderRadius: 10, padding: "8px 10px" }}>
+      <span style={{ color: "#C7CBD4", fontSize: 12 }}>{label}</span>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button onClick={() => { onYes(); setDismissed(true); }} style={{ background: "#F5A623", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#1C1F26", cursor: "pointer" }}>追加</button>
+        <button onClick={() => setDismissed(true)} style={{ background: "transparent", border: "1px solid #444A58", borderRadius: 6, padding: "4px 10px", fontSize: 11, color: "#8A8F9C", cursor: "pointer" }}>いいえ</button>
+      </div>
+    </div>
+  );
+}
+function Modal({ children, onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 50 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, background: "#242832", borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "20px 18px 28px", position: "relative" }}>
+        <button onClick={onClose} style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", cursor: "pointer" }}><X size={18} color="#8A8F9C" /></button>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const inputStyle = { background: "#1C1F26", border: "1px solid #333846", borderRadius: 8, padding: "9px 10px", color: "#fff", fontSize: 13, outline: "none" };
+const modalBtnStyle = { marginTop: 12, width: "100%", background: "#F5A623", border: "none", borderRadius: 10, padding: "11px", color: "#1C1F26", fontWeight: 800, fontSize: 14, cursor: "pointer" };
