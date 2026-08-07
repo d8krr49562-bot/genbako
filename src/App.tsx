@@ -119,6 +119,9 @@ export default function InvoiceApp() {
   const addComboPreset = (job) => {
     setComboPresets((prev) => [...prev, { ...job, id: Date.now() }]);
   };
+  const removeComboPreset = (id) => {
+    setComboPresets((prev) => prev.filter((p) => p.id !== id));
+  };
 
   if (loading) {
     return (
@@ -143,6 +146,7 @@ export default function InvoiceApp() {
         onOpenNew={() => { setEditingIndex(null); setView("jobEdit"); }}
         onOpenEdit={(idx) => { setEditingIndex(idx); setView("jobEdit"); }}
         onRemove={(idx) => removeJobFromDay(selectedDate, idx)}
+        onRemoveCombo={removeComboPreset}
       />
     );
   }
@@ -290,9 +294,12 @@ function SaveIndicator({ status, error }) {
 const iconBtnStyle = { background: "transparent", border: "none", padding: 6, cursor: "pointer", display: "flex" };
 
 // ------------------- その日の仕事一覧画面 -------------------
-function DayJobsView({ dateKey, jobs, comboPresets, onBack, onAddQuick, onOpenNew, onOpenEdit, onRemove }) {
+function DayJobsView({ dateKey, jobs, comboPresets, onBack, onAddQuick, onOpenNew, onOpenEdit, onRemove, onRemoveCombo }) {
   const [y, m, d] = dateKey.split("-").map(Number);
   const total = dayTotal(jobs);
+  const [editingCombos, setEditingCombos] = useState(false);
+  const [confirmRemoveIdx, setConfirmRemoveIdx] = useState(null);
+  const [confirmRemoveCombo, setConfirmRemoveCombo] = useState(null);
 
   return (
     <div style={{ minHeight: "100vh", background: "#1C1F26", fontFamily: "'Zen Kaku Gothic New','Hiragino Sans',sans-serif" }}>
@@ -307,23 +314,44 @@ function DayJobsView({ dateKey, jobs, comboPresets, onBack, onAddQuick, onOpenNe
 
         {comboPresets.length > 0 && (
           <div style={{ marginBottom: 18 }}>
-            <div style={{ color: "#8A8F9C", fontSize: 12, fontWeight: 700, marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
-              <Zap size={13} color="#F5A623" /> ワンタップで追加
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <div style={{ color: "#8A8F9C", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
+                <Zap size={13} color="#F5A623" /> ワンタップで追加
+              </div>
+              <button
+                onClick={() => setEditingCombos((v) => !v)}
+                style={{ background: "none", border: "none", color: editingCombos ? "#F5A623" : "#5A5F6B", fontSize: 11, fontWeight: 700, cursor: "pointer", padding: "4px 6px" }}
+              >
+                {editingCombos ? "完了" : "編集"}
+              </button>
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {comboPresets.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => onAddQuick(p)}
-                  style={{
-                    padding: "10px 14px", borderRadius: 12, border: "1px solid #F5A623",
-                    background: "rgba(245,166,35,0.1)", color: "#F5A623", fontSize: 12, fontWeight: 700,
-                    cursor: "pointer", textAlign: "left", display: "flex", flexDirection: "column", gap: 2,
-                  }}
-                >
-                  <span>{p.company || "会社未設定"}</span>
-                  <span style={{ color: "#C7CBD4", fontWeight: 500, fontSize: 11 }}>{yen(jobTotal(p))}</span>
-                </button>
+                <div key={p.id} style={{ position: "relative" }}>
+                  <button
+                    onClick={() => (editingCombos ? null : onAddQuick(p))}
+                    style={{
+                      padding: "10px 14px", borderRadius: 12, border: "1px solid #F5A623",
+                      background: "rgba(245,166,35,0.1)", color: "#F5A623", fontSize: 12, fontWeight: 700,
+                      cursor: editingCombos ? "default" : "pointer", textAlign: "left", display: "flex", flexDirection: "column", gap: 2,
+                    }}
+                  >
+                    <span>{p.company || "会社未設定"}</span>
+                    <span style={{ color: "#C7CBD4", fontWeight: 500, fontSize: 11 }}>{yen(jobTotal(p))}</span>
+                  </button>
+                  {editingCombos && (
+                    <button
+                      onClick={() => setConfirmRemoveCombo(p.id)}
+                      style={{
+                        position: "absolute", top: -8, right: -8, width: 22, height: 22, borderRadius: 11,
+                        background: "#E85D5D", border: "2px solid #1C1F26", color: "#fff", fontSize: 13, fontWeight: 800,
+                        cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           </div>
@@ -343,7 +371,7 @@ function DayJobsView({ dateKey, jobs, comboPresets, onBack, onAddQuick, onOpenNe
                 </button>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ color: "#F5A623", fontSize: 14, fontWeight: 800 }}>{yen(jobTotal(j))}</span>
-                  <button onClick={() => onRemove(idx)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+                  <button onClick={() => setConfirmRemoveIdx(idx)} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
                     <Trash2 size={15} color="#5A5F6B" />
                   </button>
                 </div>
@@ -364,6 +392,39 @@ function DayJobsView({ dateKey, jobs, comboPresets, onBack, onAddQuick, onOpenNe
           <div style={{ color: "#1C1F26", fontSize: 24, fontWeight: 800 }}>{yen(total)}</div>
         </div>
       </div>
+
+      {confirmRemoveIdx !== null && (
+        <Modal onClose={() => setConfirmRemoveIdx(null)}>
+          <div style={{ color: "#fff", fontSize: 15, fontWeight: 700, marginBottom: 6 }}>この仕事を削除しますか？</div>
+          <div style={{ color: "#8A8F9C", fontSize: 12, marginBottom: 16 }}>
+            {jobs[confirmRemoveIdx]?.company || "未設定"}（{yen(jobTotal(jobs[confirmRemoveIdx] || {}))}）
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setConfirmRemoveIdx(null)} style={{ flex: 1, background: "#242832", border: "1px solid #444A58", borderRadius: 10, padding: "11px", color: "#C7CBD4", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>キャンセル</button>
+            <button
+              onClick={() => { onRemove(confirmRemoveIdx); setConfirmRemoveIdx(null); }}
+              style={{ flex: 1, background: "#E85D5D", border: "none", borderRadius: 10, padding: "11px", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+            >
+              削除する
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {confirmRemoveCombo !== null && (
+        <Modal onClose={() => setConfirmRemoveCombo(null)}>
+          <div style={{ color: "#fff", fontSize: 15, fontWeight: 700, marginBottom: 16 }}>このワンタップボタンを削除しますか？</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setConfirmRemoveCombo(null)} style={{ flex: 1, background: "#242832", border: "1px solid #444A58", borderRadius: 10, padding: "11px", color: "#C7CBD4", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>キャンセル</button>
+            <button
+              onClick={() => { onRemoveCombo(confirmRemoveCombo); setConfirmRemoveCombo(null); }}
+              style={{ flex: 1, background: "#E85D5D", border: "none", borderRadius: 10, padding: "11px", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+            >
+              削除する
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -738,10 +799,70 @@ function InvoiceView({ year, month, entries, onBack }) {
           </>
         )}
 
-        <button disabled style={{ marginTop: 24, width: "100%", background: "#242832", border: "1px solid #3A3F4A", borderRadius: 12, padding: "13px", color: "#5A5F6B", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "not-allowed" }}>
-          PDFで出力する（準備中）
+        <button
+          onClick={() => window.print()}
+          style={{ marginTop: 24, width: "100%", background: "#242832", border: "1px solid #F5A623", borderRadius: 12, padding: "13px", color: "#F5A623", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer" }}
+        >
+          <FileText size={16} />PDFとして出力する
         </button>
+        <p style={{ color: "#5A5F6B", fontSize: 11, textAlign: "center", marginTop: 8 }}>
+          印刷画面が開いたら「PDFで保存」を選ぶと、プレビューを見てから保存できます
+        </p>
       </div>
+
+      {/* 印刷専用レイアウト(画面には出さず、印刷/PDF化する時だけ表示) */}
+      <div className="print-only" style={{ display: "none" }}>
+        <h1 style={{ fontSize: 20, marginBottom: 4 }}>{year}年{month}月 請求内容</h1>
+        <p style={{ fontSize: 12, color: "#555", marginBottom: 16 }}>合計金額：{yen(grandTotal)}</p>
+        {byCompany.length > 1 && (
+          <>
+            <h2 style={{ fontSize: 14, marginBottom: 6 }}>会社別 小計</h2>
+            <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16, fontSize: 12 }}>
+              <tbody>
+                {byCompany.map(([c, t]) => (
+                  <tr key={c}>
+                    <td style={{ border: "1px solid #ccc", padding: 6 }}>{c}</td>
+                    <td style={{ border: "1px solid #ccc", padding: 6, textAlign: "right" }}>{yen(t)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+        <h2 style={{ fontSize: 14, marginBottom: 6 }}>明細</h2>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+          <thead>
+            <tr>
+              <th style={{ border: "1px solid #ccc", padding: 6, textAlign: "left" }}>日付</th>
+              <th style={{ border: "1px solid #ccc", padding: 6, textAlign: "left" }}>会社</th>
+              <th style={{ border: "1px solid #ccc", padding: 6, textAlign: "right" }}>人工</th>
+              <th style={{ border: "1px solid #ccc", padding: 6, textAlign: "right" }}>残業代</th>
+              <th style={{ border: "1px solid #ccc", padding: 6, textAlign: "right" }}>諸経費</th>
+              <th style={{ border: "1px solid #ccc", padding: 6, textAlign: "right" }}>合計</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td style={{ border: "1px solid #ccc", padding: 6 }}>{month}月{r.day}日</td>
+                <td style={{ border: "1px solid #ccc", padding: 6 }}>{r.company}</td>
+                <td style={{ border: "1px solid #ccc", padding: 6, textAlign: "right" }}>{yen(r.ninku)}</td>
+                <td style={{ border: "1px solid #ccc", padding: 6, textAlign: "right" }}>{yen(r.overtime)}</td>
+                <td style={{ border: "1px solid #ccc", padding: 6, textAlign: "right" }}>{yen(r.transport)}</td>
+                <td style={{ border: "1px solid #ccc", padding: 6, textAlign: "right", fontWeight: 700 }}>{yen(r.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          .print-only, .print-only * { visibility: visible; }
+          .print-only { display: block !important; position: absolute; top: 0; left: 0; width: 100%; color: #000; background: #fff; padding: 20px; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -806,5 +927,5 @@ function Modal({ children, onClose }) {
   );
 }
 
-const inputStyle = { background: "#1C1F26", border: "1px solid #333846", borderRadius: 8, padding: "9px 10px", color: "#fff", fontSize: 13, outline: "none" };
+const inputStyle = { background: "#1C1F26", border: "1px solid #333846", borderRadius: 8, padding: "9px 10px", color: "#fff", fontSize: 16, outline: "none" };
 const modalBtnStyle = { marginTop: 12, width: "100%", background: "#F5A623", border: "none", borderRadius: 10, padding: "11px", color: "#1C1F26", fontWeight: 800, fontSize: 14, cursor: "pointer" };
