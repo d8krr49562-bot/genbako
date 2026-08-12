@@ -218,6 +218,7 @@ export default function InvoiceApp() {
           if (!jobs[idx]) return;
           updateJobInDay(selectedDate, idx, { ...jobs[idx], site });
         }}
+        setSitePresets={setSitePresets}
       />
     );
   }
@@ -466,19 +467,14 @@ function SaveIndicator({ status, error }) {
 const iconBtnStyle = { background: "transparent", border: "none", padding: 6, cursor: "pointer", display: "flex" };
 
 // ------------------- その日の仕事一覧画面 -------------------
-function DayJobsView({ dateKey, jobs, comboPresets, sitePresets, companies, ninkuPresets, onBack, onAddQuick, onCreateCombo, onOpenNew, onOpenEdit, onRemove, onRemoveCombo, onSetSite }) {
+function DayJobsView({ dateKey, jobs, comboPresets, sitePresets, companies, ninkuPresets, onBack, onAddQuick, onCreateCombo, onOpenNew, onOpenEdit, onRemove, onRemoveCombo, onSetSite, setSitePresets }) {
   const [y, m, d] = dateKey.split("-").map(Number);
   const total = dayTotal(jobs);
   const [editingCombos, setEditingCombos] = useState(false);
   const [confirmRemoveIdx, setConfirmRemoveIdx] = useState(null);
   const [confirmRemoveCombo, setConfirmRemoveCombo] = useState(null);
   const [siteQuickIdx, setSiteQuickIdx] = useState(null); // 現場名をワンタップ設定中の仕事のインデックス
-  const [lastAddedIndex, setLastAddedIndex] = useState(null); // 直近でワンタップ追加した仕事のインデックス
-
-  const handleAddQuick = (p) => {
-    onAddQuick(p);
-    setLastAddedIndex(jobs.length); // 末尾に追加されるので、追加前の件数がそのまま新しいインデックスになる
-  };
+  const [showPickJobForSite, setShowPickJobForSite] = useState(false); // 現場を変更する仕事を選ぶ画面
   const [showCreateCombo, setShowCreateCombo] = useState(false);
   const [newComboCompany, setNewComboCompany] = useState("");
   const [newComboSite, setNewComboSite] = useState("");
@@ -534,7 +530,7 @@ function DayJobsView({ dateKey, jobs, comboPresets, sitePresets, companies, nink
             {comboPresets.map((p) => (
               <div key={p.id} style={{ position: "relative" }}>
                 <button
-                  onClick={() => (editingCombos ? null : handleAddQuick(p))}
+                  onClick={() => (editingCombos ? null : onAddQuick(p))}
                   style={{
                     padding: "10px 14px", borderRadius: 12, border: "1px solid #F5A623",
                     background: "rgba(245,166,35,0.1)", color: "#F5A623", fontSize: 12, fontWeight: 700,
@@ -571,16 +567,16 @@ function DayJobsView({ dateKey, jobs, comboPresets, sitePresets, companies, nink
               </button>
             )}
           </div>
-          {lastAddedIndex !== null && jobs[lastAddedIndex] && sitePresets.length > 0 && (
+          {jobs.length > 0 && (
             <button
-              onClick={() => setSiteQuickIdx(lastAddedIndex)}
+              onClick={() => (jobs.length === 1 ? setSiteQuickIdx(0) : setShowPickJobForSite(true))}
               style={{
                 marginTop: 10, width: "100%", background: "#242832", border: "1px solid #F5A623", borderRadius: 10,
                 color: "#F5A623", fontSize: 12, fontWeight: 700, cursor: "pointer", padding: "9px",
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
               }}
             >
-              <Zap size={13} /> 今追加した仕事の現場を変更する
+              <Zap size={13} /> 現場を変更する
             </button>
           )}
         </div>
@@ -669,18 +665,32 @@ function DayJobsView({ dateKey, jobs, comboPresets, sitePresets, companies, nink
       )}
 
       {siteQuickIdx !== null && (
-        <Modal onClose={() => setSiteQuickIdx(null)}>
-          <div style={{ color: "#fff", fontSize: 15, fontWeight: 700, marginBottom: 10 }}>現場を選ぶ</div>
-          <ChipRow>
-            {sitePresets.map((s) => (
-              <Chip
-                key={s}
-                onClick={() => { onSetSite(siteQuickIdx, s); setSiteQuickIdx(null); }}
+        <SitePickModal
+          sitePresets={sitePresets}
+          setSitePresets={setSitePresets}
+          onPick={(s) => { onSetSite(siteQuickIdx, s); setSiteQuickIdx(null); }}
+          onClose={() => setSiteQuickIdx(null)}
+        />
+      )}
+
+      {showPickJobForSite && (
+        <Modal onClose={() => setShowPickJobForSite(false)}>
+          <div style={{ color: "#fff", fontSize: 15, fontWeight: 700, marginBottom: 10 }}>どの仕事の現場を変えますか？</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {jobs.map((j, idx) => (
+              <button
+                key={idx}
+                onClick={() => { setShowPickJobForSite(false); setSiteQuickIdx(idx); }}
+                style={{
+                  width: "100%", textAlign: "left", background: "#242832", border: "1px solid #333846", borderRadius: 10,
+                  padding: "10px 12px", color: "#fff", fontSize: 13, cursor: "pointer",
+                }}
               >
-                {s}
-              </Chip>
+                {j.company || "未設定"}{j.site ? `　${j.site}` : ""}
+                {j.personName ? `（${j.personName}）` : ""}
+              </button>
             ))}
-          </ChipRow>
+          </div>
         </Modal>
       )}
 
@@ -728,6 +738,43 @@ function DayJobsView({ dateKey, jobs, comboPresets, sitePresets, companies, nink
 }
 
 // ------------------- 1件分の入力/編集画面 -------------------
+// ------------------- 現場を選ぶ/手入力するモーダル(プリセットが無くても使える) -------------------
+function SitePickModal({ sitePresets, setSitePresets, onPick, onClose }) {
+  const [text, setText] = useState("");
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ color: "#fff", fontSize: 15, fontWeight: 700, marginBottom: 10 }}>現場を選ぶ</div>
+      {sitePresets.length > 0 ? (
+        <ChipRow>
+          {sitePresets.map((s) => (
+            <Chip key={s} onClick={() => onPick(s)}>{s}</Chip>
+          ))}
+        </ChipRow>
+      ) : (
+        <div style={{ color: "#8A8F9C", fontSize: 12, marginBottom: 8 }}>まだ現場名のプリセットがありません。下に直接入力できます。</div>
+      )}
+      <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="現場名を直接入力"
+          style={{ ...inputStyle, flex: 1, minWidth: 0, boxSizing: "border-box" }}
+        />
+      </div>
+      <button
+        onClick={() => {
+          if (!text.trim()) return;
+          if (!sitePresets.includes(text.trim())) setSitePresets((prev) => [...prev, text.trim()]);
+          onPick(text.trim());
+        }}
+        style={modalBtnStyle}
+      >
+        この現場名にする
+      </button>
+    </Modal>
+  );
+}
+
 function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, sitePresets, setSitePresets, namePresets, setNamePresets, ninkuPresets, setNinkuPresets, overtimeRatePresets, setOvertimeRatePresets, onSaveCombo, comboPresets, routes, setRoutes, highwayPresets, setHighwayPresets, entries }) {
   const [company, setCompany] = useState(job.company || "");
   const [site, setSite] = useState(job.site || "");
