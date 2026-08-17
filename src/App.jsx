@@ -34,8 +34,13 @@ const transportsTotal = (transports) => (transports || []).reduce((s, t) => s + 
 const highwayItemTotal = (h) => Math.round(Number(h.amount || 0) * (h.roundTrip ? 2 : 1));
 // 高速代リストの合計金額
 const highwaysTotal = (highways) => (highways || []).reduce((s, h) => s + highwayItemTotal(h), 0);
+// 税金の金額計算(人工・残業代・諸経費それぞれで使う)
+const ninkuTaxAmount = (p) => (p.taxEnabled ? Math.round((p.ninku || 0) * (Number(p.taxRate || 0) / 100)) : 0);
+const overtimeTaxAmount = (p) => (p.taxEnabled ? Math.round((p.overtimeAmount || 0) * (Number(p.taxRate || 0) / 100)) : 0);
+const expensesTaxAmount = (p) => (p.taxEnabled ? Math.round(expensesTotal(p.expenses) * (Number(p.taxRate || 0) / 100)) : 0);
+const totalTax = (p) => ninkuTaxAmount(p) + overtimeTaxAmount(p) + expensesTaxAmount(p);
 // 1件分の仕事の合計金額(本人分 + 追加の人数分をすべて含む)
-const personAmount = (p) => (p.ninku || 0) + (p.overtimeAmount || 0) + expensesTotal(p.expenses) + transportsTotal(p.transports) + highwaysTotal(p.highways);
+const personAmount = (p) => (p.ninku || 0) + (p.overtimeAmount || 0) + expensesTotal(p.expenses) + transportsTotal(p.transports) + highwaysTotal(p.highways) + totalTax(p);
 const jobTotal = (j) => personAmount(j) + (j.extraPeople || []).reduce((s, p) => s + personAmount(p), 0);
 // その日全体(複数件)の合計金額
 const dayTotal = (jobs) => (jobs || []).reduce((s, j) => s + jobTotal(j), 0);
@@ -49,6 +54,7 @@ const emptyHighway = () => ({ id: Date.now() + Math.random(), fromIC: "", toIC: 
 const emptyJob = () => ({
   company: "", site: "", siteAddress: "", personName: "", ninku: 0, overtimeMode: "time", overtimeMin: 0,
   overtimeRatePerHour: 2500, overtimeAmount: 0, expenses: [], transports: [], highways: [], extraPeople: [], memo: "",
+  taxEnabled: false, taxRate: 10,
 });
 
 export default function InvoiceApp() {
@@ -604,7 +610,7 @@ function DayJobsView({ dateKey, jobs, comboPresets, sitePresets, companies, nink
                         {[j.personName, ...(j.extraPeople || []).map((p) => p.name)].filter(Boolean).join("・")}
                       </div>
                     )}
-                    <div style={{ color: "#6B7280", fontSize: 11, marginTop: 2 }}>人工{yen(j.ninku)} ／ 残業{yen(j.overtimeAmount)} ／ 燃料費{yen(transportsTotal(j.transports) + expensesTotal(splitLegacyTransportExpenses(j.expenses).transportLike))} ／ 高速代{yen(highwaysTotal(j.highways))} ／ 諸経費{yen(expensesTotal(splitLegacyTransportExpenses(j.expenses).other))}</div>
+                    <div style={{ color: "#6B7280", fontSize: 11, marginTop: 2 }}>人工{yen(j.ninku)} ／ 残業{yen(j.overtimeAmount)} ／ 燃料費{yen(transportsTotal(j.transports) + expensesTotal(splitLegacyTransportExpenses(j.expenses).transportLike))} ／ 高速代{yen(highwaysTotal(j.highways))} ／ 諸経費{yen(expensesTotal(splitLegacyTransportExpenses(j.expenses).other))}{totalTax(j) > 0 ? ` ／ 税金${yen(totalTax(j))}` : ""}</div>
                   </button>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ color: "#F5A623", fontSize: 14, fontWeight: 800 }}>{yen(jobTotal(j))}</span>
@@ -790,6 +796,9 @@ function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, site
   const [highways, setHighways] = useState(job.highways && job.highways.length ? job.highways : []);
   const [memo, setMemo] = useState(job.memo || "");
 
+  const [taxEnabled, setTaxEnabled] = useState(!!job.taxEnabled);
+  const [taxRateStr, setTaxRateStr] = useState(job.taxRate ? String(job.taxRate) : "10");
+
   // ---- 同じ現場でもう1人分(コンパクトな追加ブロック。保存時は1つの記録にまとめられる) ----
   const [extraPeople, setExtraPeople] = useState(
     (job.extraPeople || []).map((p) => ({
@@ -803,6 +812,8 @@ function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, site
       transports: p.transports || [],
       highways: p.highways || [],
       expenses: p.expenses || [],
+      taxEnabled: !!p.taxEnabled,
+      taxRateStr: p.taxRate ? String(p.taxRate) : "10",
     }))
   );
   const addPerson = () => {
@@ -810,6 +821,7 @@ function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, site
       id: Date.now() + Math.random(), name: "", ninku: 0,
       overtimeMode: "time", overtimeMinStr: "", overtimeRateStr: (overtimeRatePresets.length > 0 ? String(overtimeRatePresets[0]) : "2500"), overtimeManual: 0,
       transports: [], highways: [], expenses: [],
+      taxEnabled: false, taxRateStr: "10",
     }]);
   };
   const removePerson = (id) => setExtraPeople((prev) => prev.filter((p) => p.id !== id));
@@ -849,7 +861,8 @@ function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, site
   const removePersonExpense = (personId, expId) => {
     setExtraPeople((prev) => prev.map((p) => (p.id === personId ? { ...p, expenses: p.expenses.filter((e) => e.id !== expId) } : p)));
   };
-  const personTotal = (p) => Number(p.ninku || 0) + personOvertimeAmount(p) + transportsTotal(p.transports) + highwaysTotal(p.highways) + expensesTotal(p.expenses);
+  const personTotal = (p) => Number(p.ninku || 0) + personOvertimeAmount(p) + transportsTotal(p.transports) + highwaysTotal(p.highways) + expensesTotal(p.expenses) + personTaxAmount(p);
+  const personTaxAmount = (p) => (p.taxEnabled ? Math.round((Number(p.ninku || 0) + personOvertimeAmount(p) + expensesTotal(p.expenses)) * (Number(p.taxRateStr || 0) / 100)) : 0);
 
   // 追加の人の「+その他」諸経費モーダル用(nullなら非表示、値があれば対象の人のID)
   const [showAddExpenseForPerson, setShowAddExpenseForPerson] = useState(null);
@@ -918,7 +931,10 @@ function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, site
   const expensesSum = expensesTotal(expenses);
   const transportsSum = transportsTotal(transports);
   const highwaysSum = highwaysTotal(highways);
-  const total = Number(ninku || 0) + overtimeAmount + expensesSum + transportsSum + highwaysSum;
+  const ninkuTaxYen = taxEnabled ? Math.round(Number(ninku || 0) * (Number(taxRateStr || 0) / 100)) : 0;
+  const overtimeTaxYen = taxEnabled ? Math.round(overtimeAmount * (Number(taxRateStr || 0) / 100)) : 0;
+  const expensesTaxYen = taxEnabled ? Math.round(expensesSum * (Number(taxRateStr || 0) / 100)) : 0;
+  const total = Number(ninku || 0) + overtimeAmount + expensesSum + transportsSum + highwaysSum + ninkuTaxYen + overtimeTaxYen + expensesTaxYen;
   const [y, m, d] = dateKey.split("-").map(Number);
   const thisMonthKey = `${y}-${pad(m)}`;
 
@@ -964,10 +980,12 @@ function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, site
     overtimeMode: p.overtimeMode, overtimeMin: Number(p.overtimeMinStr || 0), overtimeRatePerHour: Number(p.overtimeRateStr || 0),
     overtimeAmount: personOvertimeAmount(p),
     transports: p.transports, highways: p.highways, expenses: p.expenses,
+    taxEnabled: p.taxEnabled, taxRate: Number(p.taxRateStr || 0),
   });
   const buildJob = () => ({
     company, site, siteAddress, personName, ninku: Number(ninku), overtimeMode, overtimeMin, overtimeRatePerHour, overtimeAmount,
     expenses, transports, highways, extraPeople: extraPeople.map(buildStoredPerson), memo,
+    taxEnabled, taxRate: Number(taxRateStr || 0),
   });
   const save = () => {
     onSave([buildJob()]);
@@ -1092,6 +1110,17 @@ function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, site
           <ManualInput placeholder="例: 山田" value={personName} onChange={setPersonName} />
         </Section>
 
+        <Section label="税金">
+          <div style={{ color: "#8A8F9C", fontSize: 11, marginBottom: 8 }}>ONにすると、人工・残業代・諸経費すべてに一括で税率がかかります</div>
+          <Chip active={taxEnabled} onClick={() => setTaxEnabled((v) => !v)}>税金を適用する{taxEnabled ? "✓" : ""}</Chip>
+          {taxEnabled && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
+              <input type="text" inputMode="numeric" value={taxRateStr} onChange={(e) => setTaxRateStr(e.target.value.replace(/[^0-9]/g, ""))} style={{ ...inputStyle, width: 70, boxSizing: "border-box" }} />
+              <span style={{ color: "#8A8F9C", fontSize: 12 }}>% → 税金合計 {yen(ninkuTaxYen + overtimeTaxYen + expensesTaxYen)}</span>
+            </div>
+          )}
+        </Section>
+
         <Section label="会社">
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
             <EditToggleButton editing={editingCompanies} onClick={() => setEditingCompanies((v) => !v)} />
@@ -1162,6 +1191,7 @@ function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, site
           </ChipRow>
           {ninku && !ninkuPresets.includes(Number(ninku)) && <PresetPrompt label={`「${yen(ninku)}」をプリセットに追加する？`} onYes={registerNinkuPreset} />}
           <ManualInput placeholder="金額を直接入力" value={ninku === 0 ? "" : String(ninku)} onChange={(v) => setNinku(v.replace(/[^0-9]/g, ""))} numeric />
+          {taxEnabled && <div style={{ color: "#8A8F9C", fontSize: 12, marginTop: 8 }}>→ 税金 {yen(ninkuTaxYen)}</div>}
         </Section>
 
         <Section label="残業代">
@@ -1198,6 +1228,7 @@ function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, site
             <ManualInput placeholder="残業代の金額" value={overtimeManual === 0 ? "" : String(overtimeManual)} onChange={(v) => setOvertimeManual(v.replace(/[^0-9]/g, ""))} numeric />
           )}
           <div style={{ color: "#8A8F9C", fontSize: 12, marginTop: 6 }}>→ 残業代 {yen(overtimeAmount)}</div>
+          {taxEnabled && <div style={{ color: "#8A8F9C", fontSize: 12, marginTop: 4 }}>→ 税金 {yen(overtimeTaxYen)}</div>}
         </Section>
 
         <Section label="燃料費">
@@ -1357,6 +1388,7 @@ function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, site
               <div style={{ color: "#8FD19E", fontSize: 12, fontWeight: 700, textAlign: "right" }}>小計 {yen(expensesSum)}</div>
             </div>
           )}
+          {taxEnabled && <div style={{ color: "#8A8F9C", fontSize: 12, marginTop: 8 }}>→ 税金 {yen(expensesTaxYen)}</div>}
         </Section>
 
         {extraPeople.map((p, idx) => (
@@ -1379,6 +1411,15 @@ function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, site
             <ManualInput placeholder="例: 佐藤" value={p.name} onChange={(v) => updatePerson(p.id, { name: v })} />
             {p.name && !namePresets.includes(p.name) && (
               <PresetPrompt label={`「${p.name}」をプリセットに追加する？`} onYes={() => setNamePresets((prev) => [...prev, p.name])} />
+            )}
+
+            <div style={{ color: "#C7CBD4", fontSize: 12, fontWeight: 700, margin: "12px 0 6px" }}>税金</div>
+            <Chip active={p.taxEnabled} onClick={() => updatePerson(p.id, { taxEnabled: !p.taxEnabled })}>税金を適用する{p.taxEnabled ? "✓" : ""}</Chip>
+            {p.taxEnabled && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
+                <input type="text" inputMode="numeric" value={p.taxRateStr} onChange={(e) => updatePerson(p.id, { taxRateStr: e.target.value.replace(/[^0-9]/g, "") })} style={{ ...inputStyle, width: 70, boxSizing: "border-box" }} />
+                <span style={{ color: "#8A8F9C", fontSize: 12 }}>% → 税金合計 {yen(personTaxAmount(p))}</span>
+              </div>
             )}
 
             <div style={{ color: "#C7CBD4", fontSize: 12, fontWeight: 700, margin: "12px 0 6px" }}>人工</div>
@@ -1555,6 +1596,9 @@ function JobDetail({ dateKey, job, onSave, onBack, companies, setCompanies, site
           <div style={{ color: "#1C1F26", fontSize: 24, fontWeight: 800 }}>
             {yen(total + extraPeople.reduce((s, p) => s + personTotal(p), 0))}
           </div>
+          {(ninkuTaxYen + overtimeTaxYen + expensesTaxYen + extraPeople.reduce((s, p) => s + personTaxAmount(p), 0)) > 0 && (
+            <div style={{ color: "#3A2A08", fontSize: 11, marginTop: 4 }}>うち税金 {yen(ninkuTaxYen + overtimeTaxYen + expensesTaxYen + extraPeople.reduce((s, p) => s + personTaxAmount(p), 0))}</div>
+          )}
         </div>
 
         <button onClick={save} style={{ marginTop: 16, width: "100%", background: "#F5A623", border: "none", borderRadius: 12, padding: "14px", color: "#1C1F26", fontSize: 15, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer" }}>
@@ -2054,6 +2098,7 @@ function InvoiceView({ year, month, entries, onBack, profile, setProfile, paymen
             ...mainSplit.other.map((e) => ({ ...e, label: j.personName ? `${j.personName}：${e.label}` : e.label })),
             ...extra.flatMap((p) => splitLegacyTransportExpenses(p.expenses).other.map((e) => ({ ...e, label: p.name ? `${p.name}：${e.label}` : e.label }))),
           ];
+          const combinedTax = totalTax(j) + extra.reduce((s, p) => s + totalTax(p), 0);
           out.push({
             date: k, day: Number(k.split("-")[2]), company: j.company || "-", site: j.site || "",
             people: [j.personName, ...extra.map((p) => p.name)].filter(Boolean),
@@ -2061,6 +2106,7 @@ function InvoiceView({ year, month, entries, onBack, profile, setProfile, paymen
             transport: transportsTotal(combinedTransports), transports: combinedTransports,
             highway: highwaysTotal(combinedHighways), highways: combinedHighways,
             miscExpense: expensesTotal(combinedExpenses), expenses: combinedExpenses,
+            tax: combinedTax,
             total: jobTotal(j),
           });
         });
@@ -2069,6 +2115,7 @@ function InvoiceView({ year, month, entries, onBack, profile, setProfile, paymen
   }, [entries, year, month]);
 
   const grandTotal = rows.reduce((s, r) => s + r.total, 0);
+  const grandTaxTotal = rows.reduce((s, r) => s + (r.tax || 0), 0);
   const byCompany = useMemo(() => {
     const map = {};
     rows.forEach((r) => { map[r.company] = (map[r.company] || 0) + r.total; });
@@ -2102,6 +2149,7 @@ function InvoiceView({ year, month, entries, onBack, profile, setProfile, paymen
             transports: [...(j.transports || []), ...mainSplit.transportLike.map((e) => ({ id: e.id, memo: e.label, km: "", ratePerKm: "", __legacyAmount: e.amount }))],
             highway: highwaysTotal(j.highways), highways: j.highways || [],
             miscExpense: expensesTotal(mainSplit.other), expenses: mainSplit.other,
+            tax: totalTax(j),
             total: personAmount(j),
           });
           (j.extraPeople || []).forEach((p) => {
@@ -2113,6 +2161,7 @@ function InvoiceView({ year, month, entries, onBack, profile, setProfile, paymen
               transports: [...(p.transports || []), ...pSplit.transportLike.map((e) => ({ id: e.id, memo: e.label, km: "", ratePerKm: "", __legacyAmount: e.amount }))],
               highway: highwaysTotal(p.highways), highways: p.highways || [],
               miscExpense: expensesTotal(pSplit.other), expenses: pSplit.other,
+              tax: totalTax(p),
               total: personAmount(p),
             });
           });
@@ -2161,6 +2210,7 @@ function InvoiceView({ year, month, entries, onBack, profile, setProfile, paymen
             <div style={{ background: "linear-gradient(135deg,#F5A623,#E8871E)", borderRadius: 14, padding: "16px 18px", marginBottom: byCompany.length > 1 ? 10 : 16 }}>
               <div style={{ color: "#3A2A08", fontSize: 12, fontWeight: 700 }}>請求合計</div>
               <div style={{ color: "#1C1F26", fontSize: 28, fontWeight: 800 }}>{yen(grandTotal)}</div>
+              {grandTaxTotal > 0 && <div style={{ color: "#3A2A08", fontSize: 12, marginTop: 4 }}>うち税金合計 {yen(grandTaxTotal)}</div>}
             </div>
             {byCompany.length === 1 && (
               <button
@@ -2217,7 +2267,7 @@ function InvoiceView({ year, month, entries, onBack, profile, setProfile, paymen
                     {r.people && r.people.length > 0 && (
                       <div style={{ color: "#8A8F9C", fontSize: 11 }}>{r.people.join("・")}</div>
                     )}
-                    <div style={{ color: "#6B7280", fontSize: 11 }}>人工{yen(r.ninku)} ／ 残業{yen(r.overtime)}</div>
+                    <div style={{ color: "#6B7280", fontSize: 11 }}>人工{yen(r.ninku)} ／ 残業{yen(r.overtime)}{r.tax > 0 ? ` ／ 税金${yen(r.tax)}` : ""}</div>
                     {r.transports && r.transports.length > 0 && (
                       <div style={{ color: "#6B7280", fontSize: 11 }}>
                         燃料費：{r.transports.map((t) => `${t.memo || "移動"}${yen(transportItemTotal(t))}`).join(" ／ ")}
@@ -2368,7 +2418,7 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, onBa
   const updateRow = (idx, field, value) => {
     setEditableRows((prev) => {
       const next = [...prev];
-      next[idx] = { ...next[idx], [field]: ["total", "ninku", "overtime", "transport", "highway"].includes(field) ? Number(value.replace(/[^0-9]/g, "") || 0) : value };
+      next[idx] = { ...next[idx], [field]: ["total", "ninku", "overtime", "transport", "highway", "tax"].includes(field) ? Number(value.replace(/[^0-9]/g, "") || 0) : value };
       return next;
     });
   };
@@ -2425,13 +2475,14 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, onBa
         <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 9, marginBottom: 16 }}>
           <colgroup>
             <col style={{ width: "7%" }} />
-            <col style={{ width: "7%" }} />
-            <col style={{ width: "16%" }} />
-            <col style={{ width: "9%" }} />
-            <col style={{ width: "9%" }} />
-            <col style={{ width: "9%" }} />
-            <col style={{ width: "12%" }} />
-            <col style={{ width: "12%" }} />
+            <col style={{ width: "6%" }} />
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "11%" }} />
+            <col style={{ width: "11%" }} />
+            <col style={{ width: "8%" }} />
             <col style={{ width: "9%" }} />
             <col style={{ width: "10%" }} />
           </colgroup>
@@ -2446,6 +2497,7 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, onBa
               <th style={{ border: "1px solid #ccc", padding: "5px 3px", textAlign: "right" }}>燃料費</th>
               <th style={{ border: "1px solid #ccc", padding: "5px 3px", textAlign: "right" }}>高速代</th>
               <th style={{ border: "1px solid #ccc", padding: "5px 3px", textAlign: "right" }}>諸経費</th>
+              <th style={{ border: "1px solid #ccc", padding: "5px 3px", textAlign: "right" }}>税金</th>
               <th style={{ border: "1px solid #ccc", padding: "5px 3px", textAlign: "right" }}>金額</th>
             </tr>
           </thead>
@@ -2488,13 +2540,14 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, onBa
                     </div>
                   )}
                 </td>
+                <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word" }}><input value={r.tax} onChange={(e) => updateRow(i, "tax", e.target.value)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
                 <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word" }}><input value={r.total} onChange={(e) => updateRow(i, "total", e.target.value)} style={{ ...printFieldStyle, textAlign: "right", fontWeight: 700 }} /></td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={9} style={{ border: "1px solid #ccc", padding: "6px 8px", textAlign: "right", fontWeight: 800, background: "#F5F5F5" }}>合計</td>
+              <td colSpan={10} style={{ border: "1px solid #ccc", padding: "6px 8px", textAlign: "right", fontWeight: 800, background: "#F5F5F5" }}>合計</td>
               <td style={{ border: "1px solid #ccc", padding: "6px 8px", textAlign: "right", fontWeight: 800, background: "#F5F5F5" }}>{yen(displayTotal)}</td>
             </tr>
           </tfoot>
