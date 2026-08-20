@@ -2523,15 +2523,15 @@ function ProfileEditView({ profile, setProfile, onBack }) {
 
 // ------------------- PDF横表示テーブル(日付が横、項目が縦) -------------------
 function PdfTableLandscape({ editableRows, updateRow, printFieldStyle, displayTotal }) {
-  const labelStyle = { border: "1px solid #ccc", padding: "6px 8px", background: "#EDEDED", fontWeight: 700, fontSize: 10, whiteSpace: "nowrap" };
-  const cellStyle = { border: "1px solid #ccc", padding: 2 };
+  const labelStyle = { border: "1px solid #ccc", padding: "5px 7px", background: "#EDEDED", fontWeight: 700, fontSize: 10, whiteSpace: "nowrap", verticalAlign: "top" };
+  const cellStyle = { border: "1px solid #ccc", padding: 2, verticalAlign: "top" };
 
-  const CHUNK_SIZE = 6; // 1ページに収める日付の件数(入りきらない分は次のページへ)
+  const CHUNK_SIZE = 5; // 1ページに収める日付の件数(入りきらない分は次のページへ)。列を広めに取って改行を減らす
   const chunks = [];
   for (let i = 0; i < editableRows.length; i += CHUNK_SIZE) {
     chunks.push(editableRows.map((r, idx) => ({ r, idx })).slice(i, i + CHUNK_SIZE));
   }
-  const labelColWidth = 12;
+  const labelColWidth = 11;
   const colWidth = (100 - labelColWidth) / CHUNK_SIZE;
 
   return (
@@ -2539,8 +2539,8 @@ function PdfTableLandscape({ editableRows, updateRow, printFieldStyle, displayTo
       {chunks.map((chunk, chunkIdx) => (
         <table
           key={chunkIdx}
-          className={chunkIdx > 0 ? "pdf-page-break" : ""}
-          style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 9, marginBottom: 16 }}
+          className={`pdf-chunk${chunkIdx > 0 ? " pdf-page-break" : ""}`}
+          style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 9, marginBottom: 16, breakInside: "avoid", pageBreakInside: "avoid" }}
         >
           <colgroup>
             <col style={{ width: `${labelColWidth}%` }} />
@@ -2829,6 +2829,8 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
           .pdf-paper * { box-sizing: border-box; }
           table { table-layout: fixed !important; width: 100% !important; }
           .pdf-page-break { page-break-before: always; break-before: page; }
+          .pdf-chunk { page-break-inside: avoid; break-inside: avoid; }
+          .pdf-chunk td { vertical-align: top !important; }
           .no-print { display: none !important; }
           input, textarea { border-bottom: none !important; }
         }
