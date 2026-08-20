@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Plus, ChevronLeft, ChevronRight, ChevronDown, X, Check, FileText, Pencil, Loader2, Trash2, Zap, Search } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, ChevronDown, X, Check, FileText, Pencil, Loader2, Trash2, Zap, Search, Settings } from "lucide-react";
 
 const yen = (n) => `¥${Number(n || 0).toLocaleString()}`;
 const pad = (n) => String(n).padStart(2, "0");
@@ -77,6 +77,7 @@ export default function InvoiceApp() {
   const [highwayPresets, setHighwayPresets] = useState([]); // 高速代プリセット { id, label, amount }
   const [profile, setProfile] = useState({ issuerName: "", bankInfo: "", closingDay: "末日", invoiceNumber: "" }); // 発行者名・振込先・締め日・登録番号(共通設定)
   const [paymentStatus, setPaymentStatus] = useState({}); // { "2026-8-A社": true, ... } 入金済みかどうか
+  const [pdfLayout, setPdfLayout] = useState("portrait"); // "portrait"(縦表示・今の形) | "landscape"(横表示・日付が横並び)
 
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState("idle");
@@ -98,6 +99,7 @@ export default function InvoiceApp() {
         setHighwayPresets(data.highwayPresets || []);
         setProfile(data.profile || { issuerName: "", bankInfo: "", closingDay: "末日", invoiceNumber: "" });
         setPaymentStatus(data.paymentStatus || {});
+        setPdfLayout(data.pdfLayout || "portrait");
       }
     } catch (e) {
       // 初回起動、または読み込み失敗。初期状態のまま進める
@@ -110,14 +112,14 @@ export default function InvoiceApp() {
     if (loading) return;
     setSaveStatus("saving");
     try {
-      const payload = JSON.stringify({ entries, companies, sitePresets, namePresets, ninkuPresets, overtimeRatePresets, comboPresets, routes, highwayPresets, profile, paymentStatus });
+      const payload = JSON.stringify({ entries, companies, sitePresets, namePresets, ninkuPresets, overtimeRatePresets, comboPresets, routes, highwayPresets, profile, paymentStatus, pdfLayout });
       localStorage.setItem(STORAGE_KEY, payload);
       setSaveStatus("saved");
     } catch (e) {
       setSaveStatus("error");
       setSaveError(e && e.message ? e.message : String(e));
     }
-  }, [entries, companies, sitePresets, namePresets, ninkuPresets, overtimeRatePresets, comboPresets, routes, highwayPresets, profile, paymentStatus, loading]);
+  }, [entries, companies, sitePresets, namePresets, ninkuPresets, overtimeRatePresets, comboPresets, routes, highwayPresets, profile, paymentStatus, pdfLayout, loading]);
 
   const daysInMonth = new Date(year, month, 0).getDate();
   const firstWeekday = new Date(year, month - 1, 1).getDay();
@@ -276,6 +278,7 @@ export default function InvoiceApp() {
         onBack={() => setView("calendar")}
         profile={profile} setProfile={setProfile}
         paymentStatus={paymentStatus} setPaymentStatus={setPaymentStatus}
+        pdfLayout={pdfLayout}
         onOpenDate={(k) => { setSelectedDate(k); setView("dayJobs"); }}
       />
     );
@@ -312,6 +315,22 @@ export default function InvoiceApp() {
           });
           setView("calendar");
         }}
+        onBulkTax={(dateKeys, enabled, rate) => {
+          setEntries((prev) => {
+            const next = { ...prev };
+            dateKeys.forEach((k) => {
+              if (!next[k]) return;
+              next[k] = next[k].map((j) => ({
+                ...j,
+                taxEnabled: enabled,
+                taxRate: rate,
+                extraPeople: (j.extraPeople || []).map((p) => ({ ...p, taxEnabled: enabled, taxRate: rate })),
+              }));
+            });
+            return next;
+          });
+          setView("calendar");
+        }}
       />
     );
   }
@@ -324,6 +343,16 @@ export default function InvoiceApp() {
         sitePresets={sitePresets}
         onBack={() => setView("calendar")}
         onOpenDate={(k) => { setSelectedDate(k); setView("dayJobs"); }}
+      />
+    );
+  }
+
+  if (view === "settings") {
+    return (
+      <SettingsView
+        pdfLayout={pdfLayout}
+        setPdfLayout={setPdfLayout}
+        onBack={() => setView("calendar")}
       />
     );
   }
@@ -436,13 +465,19 @@ export default function InvoiceApp() {
           onClick={() => setView("bulkAdd")}
           style={{ marginTop: 14, width: "100%", background: "#242832", border: "1px dashed #F5A623", borderRadius: 12, padding: "11px", color: "#F5A623", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
         >
-          <Zap size={14} /> まとめて予定を追加する
+          <Zap size={14} /> まとめて予定を編集する
         </button>
         <button
           onClick={() => setView("history")}
           style={{ marginTop: 8, width: "100%", background: "#242832", border: "1px dashed #6B7280", borderRadius: 12, padding: "11px", color: "#8A8F9C", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
         >
           <Search size={14} /> 会社ごとの履歴を見る
+        </button>
+        <button
+          onClick={() => setView("settings")}
+          style={{ marginTop: 8, width: "100%", background: "#242832", border: "1px dashed #6B7280", borderRadius: 12, padding: "11px", color: "#8A8F9C", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+        >
+          <Settings size={14} /> 設定
         </button>
 
         <p style={{ color: "#5A5F6B", fontSize: 11, textAlign: "center", marginTop: 20 }}>
@@ -1755,14 +1790,17 @@ function ChipWithDelete({ editing, onDelete, children }) {
 }
 
 // ------------------- まとめて予定追加画面 -------------------
-function BulkAddView({ initialYear, initialMonth, entries, comboPresets, sitePresets, onBack, onApply, onBulkDelete }) {
-  const [mode, setMode] = useState("add"); // "add" | "delete"
+function BulkAddView({ initialYear, initialMonth, entries, comboPresets, sitePresets, onBack, onApply, onBulkDelete, onBulkTax }) {
+  const [mode, setMode] = useState("add"); // "add" | "delete" | "tax"
   const [year, setYear] = useState(initialYear);
   const [month, setMonth] = useState(initialMonth);
   const [selectedPreset, setSelectedPreset] = useState(comboPresets[0] || null);
   const [overrideSite, setOverrideSite] = useState(""); // 空なら現場名はプリセットのまま
   const [selectedDates, setSelectedDates] = useState([]); // ["2026-08-07", ...]
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkTaxEnabled, setBulkTaxEnabled] = useState(true);
+  const [bulkTaxRateStr, setBulkTaxRateStr] = useState("10");
+  const [confirmBulkTax, setConfirmBulkTax] = useState(false);
 
   const daysInMonth = new Date(year, month, 0).getDate();
   const firstWeekday = new Date(year, month - 1, 1).getDay();
@@ -1787,17 +1825,20 @@ function BulkAddView({ initialYear, initialMonth, entries, comboPresets, sitePre
 
   const selectedDatesWithData = selectedDates.filter((k) => (entries[k] || []).length > 0);
 
+  const modeTitle = mode === "add" ? "まとめて予定を追加" : mode === "delete" ? "まとめて予定を削除" : "まとめて税金を設定";
+
   return (
     <div style={{ minHeight: "100vh", background: "#1C1F26", fontFamily: "'Zen Kaku Gothic New','Hiragino Sans',sans-serif" }}>
       <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 16px 100px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
           <button onClick={onBack} style={iconBtnStyle}><ChevronLeft size={22} color="#F5A623" /></button>
-          <div style={{ color: "#fff", fontSize: 18, fontWeight: 800 }}>{mode === "add" ? "まとめて予定を追加" : "まとめて予定を削除"}</div>
+          <div style={{ color: "#fff", fontSize: 18, fontWeight: 800 }}>{modeTitle}</div>
         </div>
 
         <ChipRow>
           <Chip active={mode === "add"} onClick={() => { setMode("add"); setSelectedDates([]); }}>まとめて追加</Chip>
           <Chip active={mode === "delete"} onClick={() => { setMode("delete"); setSelectedDates([]); }}>まとめて削除</Chip>
+          <Chip active={mode === "tax"} onClick={() => { setMode("tax"); setSelectedDates([]); }}>まとめて税金</Chip>
         </ChipRow>
         <div style={{ marginBottom: 18 }} />
 
@@ -1851,10 +1892,29 @@ function BulkAddView({ initialYear, initialMonth, entries, comboPresets, sitePre
           </>
         )}
 
-        {(mode === "delete" || comboPresets.length > 0) && (
+        {mode === "tax" && (
+          <>
+            <div style={{ color: "#8A8F9C", fontSize: 12, fontWeight: 700, marginBottom: 8 }}>① 税金の設定を選ぶ</div>
+            <ChipRow>
+              <Chip active={bulkTaxEnabled} onClick={() => setBulkTaxEnabled(true)}>税金を適用する</Chip>
+              <Chip active={!bulkTaxEnabled} onClick={() => setBulkTaxEnabled(false)}>税金を適用しない（解除）</Chip>
+            </ChipRow>
+            {bulkTaxEnabled && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, marginBottom: 22 }}>
+                <input type="text" inputMode="numeric" value={bulkTaxRateStr} onChange={(e) => setBulkTaxRateStr(e.target.value.replace(/[^0-9]/g, ""))} style={{ ...inputStyle, width: 70, boxSizing: "border-box" }} />
+                <span style={{ color: "#8A8F9C", fontSize: 12 }}>%</span>
+              </div>
+            )}
+            <p style={{ color: "#5A5F6B", fontSize: 11, marginBottom: 8 }}>
+              選んだ日付のすべての仕事（追加の人も含む）に、この設定を一括で反映します。
+            </p>
+          </>
+        )}
+
+        {(mode === "delete" || mode === "tax" || comboPresets.length > 0) && (
           <>
             <div style={{ color: "#8A8F9C", fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
-              {mode === "delete" ? "削除したい日付を選ぶ" : `${sitePresets.length > 0 ? "③" : "②"} 日付を選ぶ`}（{selectedDates.length}件選択中）
+              {mode === "delete" ? "削除したい日付を選ぶ" : mode === "tax" ? "② 設定したい日付を選ぶ" : `${sitePresets.length > 0 ? "③" : "②"} 日付を選ぶ`}（{selectedDates.length}件選択中）
             </div>
 
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#242832", borderRadius: 14, padding: "10px 14px", marginBottom: 12, border: "1px solid #333846" }}>
@@ -1898,9 +1958,13 @@ function BulkAddView({ initialYear, initialMonth, entries, comboPresets, sitePre
               <p style={{ color: "#5A5F6B", fontSize: 11, marginTop: 10 }}>
                 緑っぽい日はすでに入力がある日です。選択すると追加で登録されます（上書きではありません）。
               </p>
-            ) : (
+            ) : mode === "delete" ? (
               <p style={{ color: "#5A5F6B", fontSize: 11, marginTop: 10 }}>
                 緑っぽい日は入力がある日です。選んだ日付の予定はすべて削除されます（一部だけ消すことはできません）。
+              </p>
+            ) : (
+              <p style={{ color: "#5A5F6B", fontSize: 11, marginTop: 10 }}>
+                緑っぽい日は入力がある日です。選んだ日付のすべての仕事に、上で選んだ税金設定が一括で反映されます。
               </p>
             )}
           </>
@@ -1958,6 +2022,44 @@ function BulkAddView({ initialYear, initialMonth, entries, comboPresets, sitePre
               style={{ flex: 1, background: "#E85D5D", border: "none", borderRadius: 10, padding: "11px", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
             >
               削除する
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {mode === "tax" && (
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#1C1F26", borderTop: "1px solid #333846", padding: "12px 16px" }}>
+          <div style={{ maxWidth: 480, margin: "0 auto" }}>
+            <button
+              onClick={() => setConfirmBulkTax(true)}
+              disabled={selectedDatesWithData.length === 0}
+              style={{
+                width: "100%", border: "none", borderRadius: 12, padding: "14px",
+                background: selectedDatesWithData.length > 0 ? "#F5A623" : "#3A3F4A",
+                color: selectedDatesWithData.length > 0 ? "#1C1F26" : "#6B7280",
+                fontSize: 15, fontWeight: 800, cursor: selectedDatesWithData.length > 0 ? "pointer" : "not-allowed",
+              }}
+            >
+              {selectedDatesWithData.length > 0 ? `${selectedDatesWithData.length}件の日付に反映する` : "予定のある日付を選んでください"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirmBulkTax && (
+        <Modal onClose={() => setConfirmBulkTax(false)}>
+          <div style={{ color: "#fff", fontSize: 15, fontWeight: 700, marginBottom: 6 }}>反映しますか？</div>
+          <div style={{ color: "#8A8F9C", fontSize: 12, marginBottom: 16 }}>
+            選んだ{selectedDatesWithData.length}件の日付のすべての仕事に、
+            {bulkTaxEnabled ? `税率${bulkTaxRateStr || 0}%の税金を適用します。` : "税金の適用を解除します。"}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setConfirmBulkTax(false)} style={{ flex: 1, background: "#242832", border: "1px solid #444A58", borderRadius: 10, padding: "11px", color: "#C7CBD4", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>キャンセル</button>
+            <button
+              onClick={() => { onBulkTax(selectedDatesWithData, bulkTaxEnabled, Number(bulkTaxRateStr || 0)); setConfirmBulkTax(false); }}
+              style={{ flex: 1, background: "#F5A623", border: "none", borderRadius: 10, padding: "11px", color: "#1C1F26", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+            >
+              反映する
             </button>
           </div>
         </Modal>
@@ -2077,7 +2179,7 @@ function HistoryView({ entries, companies, sitePresets, onBack, onOpenDate }) {
 }
 
 // ------------------- 請求内容確認画面 -------------------
-function InvoiceView({ year, month, entries, onBack, profile, setProfile, paymentStatus, setPaymentStatus, onOpenDate }) {
+function InvoiceView({ year, month, entries, onBack, profile, setProfile, paymentStatus, setPaymentStatus, pdfLayout, onOpenDate }) {
   const rows = useMemo(() => {
     const out = [];
     Object.entries(entries)
@@ -2182,6 +2284,7 @@ function InvoiceView({ year, month, entries, onBack, profile, setProfile, paymen
         year={year} month={month} rows={filteredPersonRows} grandTotal={filteredTotal}
         companyLabel={pdfCompanyFilter !== "__all__" ? pdfCompanyFilter : (companyList.length === 1 ? companyList[0] : "")}
         profile={profile}
+        pdfLayout={pdfLayout}
         onBack={() => setShowPdfPreview(false)}
       />
     );
@@ -2322,6 +2425,30 @@ function InvoiceView({ year, month, entries, onBack, profile, setProfile, paymen
 
 // ------------------- PDFプレビュー画面(白い紙面イメージ・手入力で編集可) -------------------
 // ------------------- 発行者名・振込先の設定画面 -------------------
+// ------------------- 設定画面 -------------------
+function SettingsView({ pdfLayout, setPdfLayout, onBack }) {
+  return (
+    <div style={{ minHeight: "100vh", background: "#1C1F26", fontFamily: "'Zen Kaku Gothic New','Hiragino Sans',sans-serif" }}>
+      <div style={{ maxWidth: 480, margin: "0 auto", padding: "18px 16px 60px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+          <button onClick={onBack} style={iconBtnStyle}><ChevronLeft size={22} color="#F5A623" /></button>
+          <div style={{ color: "#fff", fontSize: 18, fontWeight: 800 }}>設定</div>
+        </div>
+
+        <Section label="請求書（PDF）の向き">
+          <div style={{ color: "#8A8F9C", fontSize: 11, marginBottom: 10 }}>
+            縦表示は今まで通り、日付が縦に並ぶ形です。横表示にすると、日付が横に並び、人工・残業代・諸経費などが縦に並ぶ形になります。1度選んだ後、自動で元に戻ることはありません。
+          </div>
+          <ChipRow>
+            <Chip active={pdfLayout === "portrait"} onClick={() => setPdfLayout("portrait")}>縦表示（今まで通り）</Chip>
+            <Chip active={pdfLayout === "landscape"} onClick={() => setPdfLayout("landscape")}>横表示</Chip>
+          </ChipRow>
+        </Section>
+      </div>
+    </div>
+  );
+}
+
 function ProfileEditView({ profile, setProfile, onBack }) {
   const [issuerName, setIssuerName] = useState(profile?.issuerName || "");
   const [bankInfo, setBankInfo] = useState(profile?.bankInfo || "");
@@ -2394,7 +2521,109 @@ function ProfileEditView({ profile, setProfile, onBack }) {
   );
 }
 
-function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, onBack }) {
+// ------------------- PDF横表示テーブル(日付が横、項目が縦) -------------------
+function PdfTableLandscape({ editableRows, updateRow, printFieldStyle, displayTotal }) {
+  const labelStyle = { border: "1px solid #ccc", padding: "6px 8px", background: "#EDEDED", fontWeight: 700, fontSize: 10, whiteSpace: "nowrap" };
+  const cellStyle = { border: "1px solid #ccc", padding: 2, minWidth: 90 };
+  return (
+    <div style={{ overflowX: "auto", marginBottom: 16 }}>
+      <table style={{ borderCollapse: "collapse", fontSize: 9 }}>
+        <tbody>
+          <tr>
+            <td style={labelStyle}>日にち</td>
+            {editableRows.map((r, i) => (
+              <td key={i} style={cellStyle}><AutoGrowInput value={r.dateLabel} onChange={(v) => updateRow(i, "dateLabel", v)} style={printFieldStyle} /></td>
+            ))}
+          </tr>
+          <tr>
+            <td style={labelStyle}>名前</td>
+            {editableRows.map((r, i) => (
+              <td key={i} style={cellStyle}><AutoGrowInput value={r.nameLabel} onChange={(v) => updateRow(i, "nameLabel", v)} style={printFieldStyle} /></td>
+            ))}
+          </tr>
+          <tr>
+            <td style={labelStyle}>現場名</td>
+            {editableRows.map((r, i) => (
+              <td key={i} style={cellStyle}><AutoGrowInput value={r.siteLabel} onChange={(v) => updateRow(i, "siteLabel", v)} style={printFieldStyle} /></td>
+            ))}
+          </tr>
+          <tr>
+            <td style={labelStyle}>現場の住所</td>
+            {editableRows.map((r, i) => (
+              <td key={i} style={cellStyle}><AutoGrowInput value={r.addressLabel} onChange={(v) => updateRow(i, "addressLabel", v)} style={{ ...printFieldStyle, fontSize: 8.5 }} /></td>
+            ))}
+          </tr>
+          <tr>
+            <td style={labelStyle}>人工</td>
+            {editableRows.map((r, i) => (
+              <td key={i} style={{ ...cellStyle, textAlign: "right" }}><AutoGrowInput value={String(r.ninku)} onChange={(v) => updateRow(i, "ninku", v)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
+            ))}
+          </tr>
+          <tr>
+            <td style={labelStyle}>残業代</td>
+            {editableRows.map((r, i) => (
+              <td key={i} style={{ ...cellStyle, textAlign: "right" }}><AutoGrowInput value={String(r.overtime)} onChange={(v) => updateRow(i, "overtime", v)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
+            ))}
+          </tr>
+          <tr>
+            <td style={labelStyle}>燃料費</td>
+            {editableRows.map((r, i) => (
+              <td key={i} style={{ ...cellStyle, textAlign: "right" }}>
+                <AutoGrowInput value={String(r.transport)} onChange={(v) => updateRow(i, "transport", v)} style={{ ...printFieldStyle, textAlign: "right" }} />
+                {r.transports && r.transports.length > 0 && (
+                  <div style={{ fontSize: 7, color: "#666", textAlign: "right", padding: "0 3px", lineHeight: 1.3, wordBreak: "break-word" }}>
+                    {r.transports.map((t, ti) => (<div key={ti}>{t.memo || "移動"}：{yen(transportItemTotal(t))}</div>))}
+                  </div>
+                )}
+              </td>
+            ))}
+          </tr>
+          <tr>
+            <td style={labelStyle}>高速代</td>
+            {editableRows.map((r, i) => (
+              <td key={i} style={{ ...cellStyle, textAlign: "right" }}>
+                <AutoGrowInput value={String(r.highway)} onChange={(v) => updateRow(i, "highway", v)} style={{ ...printFieldStyle, textAlign: "right" }} />
+                {r.highways && r.highways.length > 0 && (
+                  <div style={{ fontSize: 7, color: "#666", textAlign: "right", padding: "0 3px", lineHeight: 1.3, wordBreak: "break-word" }}>
+                    {r.highways.map((h, hi) => (<div key={hi}>{h.fromIC ? `${h.fromIC}IC〜${h.toIC}IC` : "高速代"}：{yen(highwayItemTotal(h))}</div>))}
+                  </div>
+                )}
+              </td>
+            ))}
+          </tr>
+          <tr>
+            <td style={labelStyle}>諸経費</td>
+            {editableRows.map((r, i) => (
+              <td key={i} style={{ ...cellStyle, textAlign: "right" }}>
+                <AutoGrowInput value={String(r.miscExpense)} onChange={(v) => updateRow(i, "miscExpense", v)} style={{ ...printFieldStyle, textAlign: "right" }} />
+                {r.expenses && r.expenses.length > 0 && (
+                  <div style={{ fontSize: 7, color: "#666", textAlign: "right", padding: "0 3px", lineHeight: 1.3, wordBreak: "break-word" }}>
+                    {r.expenses.map((e, ei) => (<div key={ei}>{e.label}：{yen(e.amount)}</div>))}
+                  </div>
+                )}
+              </td>
+            ))}
+          </tr>
+          <tr>
+            <td style={labelStyle}>税金</td>
+            {editableRows.map((r, i) => (
+              <td key={i} style={{ ...cellStyle, textAlign: "right" }}><AutoGrowInput value={String(r.tax)} onChange={(v) => updateRow(i, "tax", v)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
+            ))}
+          </tr>
+          <tr>
+            <td style={{ ...labelStyle, background: "#F5F5F5" }}>金額</td>
+            {editableRows.map((r, i) => (
+              <td key={i} style={{ ...cellStyle, textAlign: "right" }}><AutoGrowInput value={String(r.total)} onChange={(v) => updateRow(i, "total", v)} style={{ ...printFieldStyle, textAlign: "right", fontWeight: 700 }} /></td>
+            ))}
+            <td style={{ ...labelStyle, textAlign: "right" }}>合計 {yen(displayTotal)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfLayout, onBack }) {
   const lastDay = new Date(year, month, 0).getDate(); // その月の最終日
   const closingDay = profile?.closingDay || "末日";
   const resolvedDay = closingDay === "末日" ? lastDay : Math.min(Number(String(closingDay).replace(/[^0-9]/g, "")) || lastDay, lastDay);
@@ -2472,6 +2701,9 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, onBa
           <span style={{ fontSize: 18, fontWeight: 800 }}>{yen(displayTotal)}</span>
         </div>
 
+        {pdfLayout === "landscape" ? (
+          <PdfTableLandscape editableRows={editableRows} updateRow={updateRow} printFieldStyle={printFieldStyle} displayTotal={displayTotal} />
+        ) : (
         <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 9, marginBottom: 16 }}>
           <colgroup>
             <col style={{ width: "7%" }} />
@@ -2508,10 +2740,10 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, onBa
                 <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word", verticalAlign: "top" }}><AutoGrowInput value={r.nameLabel} onChange={(v) => updateRow(i, "nameLabel", v)} style={printFieldStyle} /></td>
                 <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word", verticalAlign: "top" }}><AutoGrowInput value={r.siteLabel} onChange={(v) => updateRow(i, "siteLabel", v)} style={printFieldStyle} /></td>
                 <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word", verticalAlign: "top" }}><AutoGrowInput value={r.addressLabel} onChange={(v) => updateRow(i, "addressLabel", v)} style={{ ...printFieldStyle, fontSize: 8.5 }} /></td>
-                <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word" }}><input value={r.ninku} onChange={(e) => updateRow(i, "ninku", e.target.value)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
-                <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word" }}><input value={r.overtime} onChange={(e) => updateRow(i, "overtime", e.target.value)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
+                <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word" }}><AutoGrowInput value={String(r.ninku)} onChange={(v) => updateRow(i, "ninku", v)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
+                <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word" }}><AutoGrowInput value={String(r.overtime)} onChange={(v) => updateRow(i, "overtime", v)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
                 <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word", overflowWrap: "break-word" }}>
-                  <input value={r.transport} onChange={(e) => updateRow(i, "transport", e.target.value)} style={{ ...printFieldStyle, textAlign: "right" }} />
+                  <AutoGrowInput value={String(r.transport)} onChange={(v) => updateRow(i, "transport", v)} style={{ ...printFieldStyle, textAlign: "right" }} />
                   {r.transports && r.transports.length > 0 && (
                     <div style={{ fontSize: 7, color: "#666", textAlign: "right", padding: "0 3px", lineHeight: 1.3, wordBreak: "break-word" }}>
                       {r.transports.map((t, ti) => (
@@ -2521,7 +2753,7 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, onBa
                   )}
                 </td>
                 <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word", overflowWrap: "break-word" }}>
-                  <input value={r.highway} onChange={(e) => updateRow(i, "highway", e.target.value)} style={{ ...printFieldStyle, textAlign: "right" }} />
+                  <AutoGrowInput value={String(r.highway)} onChange={(v) => updateRow(i, "highway", v)} style={{ ...printFieldStyle, textAlign: "right" }} />
                   {r.highways && r.highways.length > 0 && (
                     <div style={{ fontSize: 7, color: "#666", textAlign: "right", padding: "0 3px", lineHeight: 1.3, wordBreak: "break-word" }}>
                       {r.highways.map((h, hi) => (
@@ -2531,7 +2763,7 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, onBa
                   )}
                 </td>
                 <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word", overflowWrap: "break-word" }}>
-                  <input value={r.miscExpense} onChange={(e) => updateRow(i, "miscExpense", e.target.value)} style={{ ...printFieldStyle, textAlign: "right" }} />
+                  <AutoGrowInput value={String(r.miscExpense)} onChange={(v) => updateRow(i, "miscExpense", v)} style={{ ...printFieldStyle, textAlign: "right" }} />
                   {r.expenses && r.expenses.length > 0 && (
                     <div style={{ fontSize: 7, color: "#666", textAlign: "right", padding: "0 3px", lineHeight: 1.3, wordBreak: "break-word" }}>
                       {r.expenses.map((e, ei) => (
@@ -2540,8 +2772,8 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, onBa
                     </div>
                   )}
                 </td>
-                <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word" }}><input value={r.tax} onChange={(e) => updateRow(i, "tax", e.target.value)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
-                <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word" }}><input value={r.total} onChange={(e) => updateRow(i, "total", e.target.value)} style={{ ...printFieldStyle, textAlign: "right", fontWeight: 700 }} /></td>
+                <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word" }}><AutoGrowInput value={String(r.tax)} onChange={(v) => updateRow(i, "tax", v)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
+                <td style={{ border: "1px solid #ccc", padding: 2, wordBreak: "break-word" }}><AutoGrowInput value={String(r.total)} onChange={(v) => updateRow(i, "total", v)} style={{ ...printFieldStyle, textAlign: "right", fontWeight: 700 }} /></td>
               </tr>
             ))}
           </tbody>
@@ -2552,6 +2784,7 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, onBa
             </tr>
           </tfoot>
         </table>
+        )}
 
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontSize: 10, color: "#777", marginBottom: 4 }}>振込先</div>
