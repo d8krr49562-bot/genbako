@@ -8,7 +8,7 @@ const monthKey = (y, m) => `${y}-${pad(m)}`;
 const todayObj = new Date();
 
 const STORAGE_KEY = "invoice-app-data-v2";
-const APP_VERSION = "Ver 2.2"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
+const APP_VERSION = "Ver 2.3"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
 
 // 諸経費リストの合計金額
 const expensesTotal = (expenses) => (expenses || []).reduce((s, e) => s + Number(e.amount || 0), 0);
@@ -2731,7 +2731,7 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
           <span style={{ fontSize: 18, fontWeight: 800 }}>{yen(displayTotal)}</span>
         </div>
 
-        <div style={{ border: "1px solid #ddd", borderRadius: 6, padding: "10px 14px", marginBottom: 16 }}>
+        <div className={pdfLayout === "landscape" ? "pdf-page-break-after" : ""} style={{ border: "1px solid #ddd", borderRadius: 6, padding: "10px 14px", marginBottom: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#555", marginBottom: 6 }}>内訳（合計）</div>
           {[
             ["人工合計一式", editableRows.reduce((s, r) => s + Number(r.ninku || 0), 0)],
@@ -2853,6 +2853,7 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
           .pdf-paper * { box-sizing: border-box; }
           table { table-layout: fixed !important; width: 100% !important; }
           .pdf-page-break { display: block; page-break-before: always; break-before: page; }
+          .pdf-page-break-after { display: block; page-break-after: always; break-after: page; }
           .pdf-chunk td { vertical-align: top !important; }
           .pdf-chunk thead { display: table-header-group; }
           .no-print { display: none !important; }
