@@ -8,6 +8,7 @@ const monthKey = (y, m) => `${y}-${pad(m)}`;
 const todayObj = new Date();
 
 const STORAGE_KEY = "invoice-app-data-v2";
+const APP_VERSION = "Ver 2.1"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
 
 // 諸経費リストの合計金額
 const expensesTotal = (expenses) => (expenses || []).reduce((s, e) => s + Number(e.amount || 0), 0);
@@ -482,6 +483,9 @@ export default function InvoiceApp() {
 
         <p style={{ color: "#5A5F6B", fontSize: 11, textAlign: "center", marginTop: 20 }}>
           日付をタップするとその場で金額を確認できます。1日に複数件の仕事も追加できます。
+        </p>
+        <p style={{ color: "#5A5F6B", fontSize: 11, textAlign: "right", marginTop: 8 }}>
+          {APP_VERSION}
         </p>
       </div>
       <style>{`
@@ -2539,7 +2543,7 @@ function PdfTableLandscape({ editableRows, updateRow, printFieldStyle, displayTo
       {chunks.map((chunk, chunkIdx) => (
         <table
           key={chunkIdx}
-          className={`pdf-chunk${chunkIdx > 0 ? " pdf-page-break" : ""}`}
+          className="pdf-chunk pdf-page-break"
           style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 9, marginBottom: 16 }}
         >
           <colgroup>
