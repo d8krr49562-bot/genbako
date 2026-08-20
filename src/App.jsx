@@ -2540,19 +2540,21 @@ function PdfTableLandscape({ editableRows, updateRow, printFieldStyle, displayTo
         <table
           key={chunkIdx}
           className={`pdf-chunk${chunkIdx > 0 ? " pdf-page-break" : ""}`}
-          style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 9, marginBottom: 16, breakInside: "avoid", pageBreakInside: "avoid" }}
+          style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 9, marginBottom: 16 }}
         >
           <colgroup>
             <col style={{ width: `${labelColWidth}%` }} />
             {chunk.map((_, i) => <col key={i} style={{ width: `${colWidth}%` }} />)}
           </colgroup>
-          <tbody>
+          <thead>
             <tr>
               <td style={labelStyle}>日にち</td>
               {chunk.map(({ r, idx }) => (
                 <td key={idx} style={cellStyle}><AutoGrowInput value={r.dateLabel} onChange={(v) => updateRow(idx, "dateLabel", v)} style={printFieldStyle} /></td>
               ))}
             </tr>
+          </thead>
+          <tbody>
             <tr>
               <td style={labelStyle}>名前</td>
               {chunk.map(({ r, idx }) => (
@@ -2733,8 +2735,8 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
             ["高速代合計一式", editableRows.reduce((s, r) => s + Number(r.highway || 0), 0)],
             ["諸経費合計一式", editableRows.reduce((s, r) => s + Number(r.miscExpense || 0), 0)],
             ["税金合計一式", editableRows.reduce((s, r) => s + Number(r.tax || 0), 0)],
-          ].map(([label, sum]) => (
-            <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 11 }}>
+          ].map(([label, sum], i, arr) => (
+            <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 11, borderBottom: i < arr.length - 1 ? "1px solid #eee" : "none" }}>
               <span style={{ color: "#333" }}>{label}</span>
               <span style={{ fontWeight: 700 }}>{yen(sum)}</span>
             </div>
@@ -2846,8 +2848,8 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
           .pdf-paper * { box-sizing: border-box; }
           table { table-layout: fixed !important; width: 100% !important; }
           .pdf-page-break { page-break-before: always; break-before: page; }
-          .pdf-chunk { page-break-inside: avoid; break-inside: avoid; }
           .pdf-chunk td { vertical-align: top !important; }
+          .pdf-chunk thead { display: table-header-group; }
           .no-print { display: none !important; }
           input, textarea { border-bottom: none !important; }
         }
