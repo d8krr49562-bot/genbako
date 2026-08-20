@@ -8,7 +8,7 @@ const monthKey = (y, m) => `${y}-${pad(m)}`;
 const todayObj = new Date();
 
 const STORAGE_KEY = "invoice-app-data-v2";
-const APP_VERSION = "Ver 2.3"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
+const APP_VERSION = "Ver 2.4"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
 
 // 諸経費リストの合計金額
 const expensesTotal = (expenses) => (expenses || []).reduce((s, e) => s + Number(e.amount || 0), 0);
@@ -2541,7 +2541,7 @@ function PdfTableLandscape({ editableRows, updateRow, printFieldStyle, displayTo
   return (
     <div>
       {chunks.map((chunk, chunkIdx) => (
-        <div key={chunkIdx} className="pdf-page-break">
+        <div key={chunkIdx} className="pdf-page-break" style={{ minHeight: "186mm", boxSizing: "border-box" }}>
         <table
           className="pdf-chunk"
           style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 9, marginBottom: 16 }}
@@ -2731,21 +2731,26 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
           <span style={{ fontSize: 18, fontWeight: 800 }}>{yen(displayTotal)}</span>
         </div>
 
-        <div className={pdfLayout === "landscape" ? "pdf-page-break-after" : ""} style={{ border: "1px solid #ddd", borderRadius: 6, padding: "10px 14px", marginBottom: 16 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#555", marginBottom: 6 }}>内訳（合計）</div>
-          {[
-            ["人工合計一式", editableRows.reduce((s, r) => s + Number(r.ninku || 0), 0)],
-            ["残業代合計一式", editableRows.reduce((s, r) => s + Number(r.overtime || 0), 0)],
-            ["燃料費合計一式", editableRows.reduce((s, r) => s + Number(r.transport || 0), 0)],
-            ["高速代合計一式", editableRows.reduce((s, r) => s + Number(r.highway || 0), 0)],
-            ["諸経費合計一式", editableRows.reduce((s, r) => s + Number(r.miscExpense || 0), 0)],
-            ["税金合計一式", editableRows.reduce((s, r) => s + Number(r.tax || 0), 0)],
-          ].map(([label, sum], i, arr) => (
-            <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 11, borderBottom: i < arr.length - 1 ? "1px solid #eee" : "none" }}>
-              <span style={{ color: "#333" }}>{label}</span>
-              <span style={{ fontWeight: 700 }}>{yen(sum)}</span>
-            </div>
-          ))}
+        <div
+          className={pdfLayout === "landscape" ? "pdf-page-break-after" : ""}
+          style={pdfLayout === "landscape" ? { minHeight: "186mm", boxSizing: "border-box" } : undefined}
+        >
+          <div style={{ border: "1px solid #ddd", borderRadius: 6, padding: "10px 14px", marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#555", marginBottom: 6 }}>内訳（合計）</div>
+            {[
+              ["人工合計一式", editableRows.reduce((s, r) => s + Number(r.ninku || 0), 0)],
+              ["残業代合計一式", editableRows.reduce((s, r) => s + Number(r.overtime || 0), 0)],
+              ["燃料費合計一式", editableRows.reduce((s, r) => s + Number(r.transport || 0), 0)],
+              ["高速代合計一式", editableRows.reduce((s, r) => s + Number(r.highway || 0), 0)],
+              ["諸経費合計一式", editableRows.reduce((s, r) => s + Number(r.miscExpense || 0), 0)],
+              ["税金合計一式", editableRows.reduce((s, r) => s + Number(r.tax || 0), 0)],
+            ].map(([label, sum], i, arr) => (
+              <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 11, borderBottom: i < arr.length - 1 ? "1px solid #eee" : "none" }}>
+                <span style={{ color: "#333" }}>{label}</span>
+                <span style={{ fontWeight: 700 }}>{yen(sum)}</span>
+              </div>
+            ))}
+          </div>
         </div>
 
         {pdfLayout === "landscape" ? (
