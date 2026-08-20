@@ -9,7 +9,7 @@ const monthKey = (y, m) => `${y}-${pad(m)}`;
 const todayObj = new Date();
 
 const STORAGE_KEY = "invoice-app-data-v2";
-const APP_VERSION = "Ver 3.4"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
+const APP_VERSION = "Ver 3.5"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
 
 // ------------------- PDFを直接組み立てる仕組み(jsPDF)。ブラウザの印刷機能に頼らず、改ページを自分で完全に制御する -------------------
 const JP_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/mplus1p/MPLUS1p-Regular.ttf";
@@ -3261,8 +3261,17 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
             <div style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>作成したPDFを確認</div>
             <div style={{ width: 60 }} />
           </div>
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <iframe title="PDFプレビュー" src={pdfPreviewUrl} style={{ width: "100%", height: "100%", border: "none", background: "#fff" }} />
+          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 20px", gap: 16 }}>
+            <FileText size={48} color="#F5A623" />
+            <div style={{ color: "#C7CBD4", fontSize: 13, textAlign: "center", lineHeight: 1.6 }}>
+              PDFが作成できました。下のボタンで開くと、ページをめくって中身を確認できます。
+            </div>
+            <button
+              onClick={() => window.open(pdfPreviewUrl, "_blank")}
+              style={{ background: "#242832", border: "1px solid #F5A623", borderRadius: 10, padding: "12px 20px", color: "#F5A623", fontWeight: 700, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}
+            >
+              <FileText size={16} /> PDFを開いて確認する
+            </button>
           </div>
           <div style={{ padding: "12px 16px", borderTop: "1px solid #333846", display: "flex", gap: 10 }}>
             <button
