@@ -2524,101 +2524,124 @@ function ProfileEditView({ profile, setProfile, onBack }) {
 // ------------------- PDF横表示テーブル(日付が横、項目が縦) -------------------
 function PdfTableLandscape({ editableRows, updateRow, printFieldStyle, displayTotal }) {
   const labelStyle = { border: "1px solid #ccc", padding: "6px 8px", background: "#EDEDED", fontWeight: 700, fontSize: 10, whiteSpace: "nowrap" };
-  const cellStyle = { border: "1px solid #ccc", padding: 2, minWidth: 90 };
+  const cellStyle = { border: "1px solid #ccc", padding: 2 };
+
+  const CHUNK_SIZE = 6; // 1ページに収める日付の件数(入りきらない分は次のページへ)
+  const chunks = [];
+  for (let i = 0; i < editableRows.length; i += CHUNK_SIZE) {
+    chunks.push(editableRows.map((r, idx) => ({ r, idx })).slice(i, i + CHUNK_SIZE));
+  }
+  const labelColWidth = 12;
+  const colWidth = (100 - labelColWidth) / CHUNK_SIZE;
+
   return (
-    <div style={{ overflowX: "auto", marginBottom: 16 }}>
-      <table style={{ borderCollapse: "collapse", fontSize: 9 }}>
-        <tbody>
-          <tr>
-            <td style={labelStyle}>日にち</td>
-            {editableRows.map((r, i) => (
-              <td key={i} style={cellStyle}><AutoGrowInput value={r.dateLabel} onChange={(v) => updateRow(i, "dateLabel", v)} style={printFieldStyle} /></td>
-            ))}
-          </tr>
-          <tr>
-            <td style={labelStyle}>名前</td>
-            {editableRows.map((r, i) => (
-              <td key={i} style={cellStyle}><AutoGrowInput value={r.nameLabel} onChange={(v) => updateRow(i, "nameLabel", v)} style={printFieldStyle} /></td>
-            ))}
-          </tr>
-          <tr>
-            <td style={labelStyle}>現場名</td>
-            {editableRows.map((r, i) => (
-              <td key={i} style={cellStyle}><AutoGrowInput value={r.siteLabel} onChange={(v) => updateRow(i, "siteLabel", v)} style={printFieldStyle} /></td>
-            ))}
-          </tr>
-          <tr>
-            <td style={labelStyle}>現場の住所</td>
-            {editableRows.map((r, i) => (
-              <td key={i} style={cellStyle}><AutoGrowInput value={r.addressLabel} onChange={(v) => updateRow(i, "addressLabel", v)} style={{ ...printFieldStyle, fontSize: 8.5 }} /></td>
-            ))}
-          </tr>
-          <tr>
-            <td style={labelStyle}>人工</td>
-            {editableRows.map((r, i) => (
-              <td key={i} style={{ ...cellStyle, textAlign: "right" }}><AutoGrowInput value={String(r.ninku)} onChange={(v) => updateRow(i, "ninku", v)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
-            ))}
-          </tr>
-          <tr>
-            <td style={labelStyle}>残業代</td>
-            {editableRows.map((r, i) => (
-              <td key={i} style={{ ...cellStyle, textAlign: "right" }}><AutoGrowInput value={String(r.overtime)} onChange={(v) => updateRow(i, "overtime", v)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
-            ))}
-          </tr>
-          <tr>
-            <td style={labelStyle}>燃料費</td>
-            {editableRows.map((r, i) => (
-              <td key={i} style={{ ...cellStyle, textAlign: "right" }}>
-                <AutoGrowInput value={String(r.transport)} onChange={(v) => updateRow(i, "transport", v)} style={{ ...printFieldStyle, textAlign: "right" }} />
-                {r.transports && r.transports.length > 0 && (
-                  <div style={{ fontSize: 7, color: "#666", textAlign: "right", padding: "0 3px", lineHeight: 1.3, wordBreak: "break-word" }}>
-                    {r.transports.map((t, ti) => (<div key={ti}>{t.memo || "移動"}：{yen(transportItemTotal(t))}</div>))}
-                  </div>
-                )}
-              </td>
-            ))}
-          </tr>
-          <tr>
-            <td style={labelStyle}>高速代</td>
-            {editableRows.map((r, i) => (
-              <td key={i} style={{ ...cellStyle, textAlign: "right" }}>
-                <AutoGrowInput value={String(r.highway)} onChange={(v) => updateRow(i, "highway", v)} style={{ ...printFieldStyle, textAlign: "right" }} />
-                {r.highways && r.highways.length > 0 && (
-                  <div style={{ fontSize: 7, color: "#666", textAlign: "right", padding: "0 3px", lineHeight: 1.3, wordBreak: "break-word" }}>
-                    {r.highways.map((h, hi) => (<div key={hi}>{h.fromIC ? `${h.fromIC}IC〜${h.toIC}IC` : "高速代"}：{yen(highwayItemTotal(h))}</div>))}
-                  </div>
-                )}
-              </td>
-            ))}
-          </tr>
-          <tr>
-            <td style={labelStyle}>諸経費</td>
-            {editableRows.map((r, i) => (
-              <td key={i} style={{ ...cellStyle, textAlign: "right" }}>
-                <AutoGrowInput value={String(r.miscExpense)} onChange={(v) => updateRow(i, "miscExpense", v)} style={{ ...printFieldStyle, textAlign: "right" }} />
-                {r.expenses && r.expenses.length > 0 && (
-                  <div style={{ fontSize: 7, color: "#666", textAlign: "right", padding: "0 3px", lineHeight: 1.3, wordBreak: "break-word" }}>
-                    {r.expenses.map((e, ei) => (<div key={ei}>{e.label}：{yen(e.amount)}</div>))}
-                  </div>
-                )}
-              </td>
-            ))}
-          </tr>
-          <tr>
-            <td style={labelStyle}>税金</td>
-            {editableRows.map((r, i) => (
-              <td key={i} style={{ ...cellStyle, textAlign: "right" }}><AutoGrowInput value={String(r.tax)} onChange={(v) => updateRow(i, "tax", v)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
-            ))}
-          </tr>
-          <tr>
-            <td style={{ ...labelStyle, background: "#F5F5F5" }}>金額</td>
-            {editableRows.map((r, i) => (
-              <td key={i} style={{ ...cellStyle, textAlign: "right" }}><AutoGrowInput value={String(r.total)} onChange={(v) => updateRow(i, "total", v)} style={{ ...printFieldStyle, textAlign: "right", fontWeight: 700 }} /></td>
-            ))}
-            <td style={{ ...labelStyle, textAlign: "right" }}>合計 {yen(displayTotal)}</td>
-          </tr>
-        </tbody>
-      </table>
+    <div>
+      {chunks.map((chunk, chunkIdx) => (
+        <table
+          key={chunkIdx}
+          className={chunkIdx > 0 ? "pdf-page-break" : ""}
+          style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 9, marginBottom: 16 }}
+        >
+          <colgroup>
+            <col style={{ width: `${labelColWidth}%` }} />
+            {chunk.map((_, i) => <col key={i} style={{ width: `${colWidth}%` }} />)}
+          </colgroup>
+          <tbody>
+            <tr>
+              <td style={labelStyle}>日にち</td>
+              {chunk.map(({ r, idx }) => (
+                <td key={idx} style={cellStyle}><AutoGrowInput value={r.dateLabel} onChange={(v) => updateRow(idx, "dateLabel", v)} style={printFieldStyle} /></td>
+              ))}
+            </tr>
+            <tr>
+              <td style={labelStyle}>名前</td>
+              {chunk.map(({ r, idx }) => (
+                <td key={idx} style={cellStyle}><AutoGrowInput value={r.nameLabel} onChange={(v) => updateRow(idx, "nameLabel", v)} style={printFieldStyle} /></td>
+              ))}
+            </tr>
+            <tr>
+              <td style={labelStyle}>現場名</td>
+              {chunk.map(({ r, idx }) => (
+                <td key={idx} style={cellStyle}><AutoGrowInput value={r.siteLabel} onChange={(v) => updateRow(idx, "siteLabel", v)} style={printFieldStyle} /></td>
+              ))}
+            </tr>
+            <tr>
+              <td style={labelStyle}>現場の住所</td>
+              {chunk.map(({ r, idx }) => (
+                <td key={idx} style={cellStyle}><AutoGrowInput value={r.addressLabel} onChange={(v) => updateRow(idx, "addressLabel", v)} style={{ ...printFieldStyle, fontSize: 8.5 }} /></td>
+              ))}
+            </tr>
+            <tr>
+              <td style={labelStyle}>人工</td>
+              {chunk.map(({ r, idx }) => (
+                <td key={idx} style={{ ...cellStyle, textAlign: "right" }}><AutoGrowInput value={String(r.ninku)} onChange={(v) => updateRow(idx, "ninku", v)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
+              ))}
+            </tr>
+            <tr>
+              <td style={labelStyle}>残業代</td>
+              {chunk.map(({ r, idx }) => (
+                <td key={idx} style={{ ...cellStyle, textAlign: "right" }}><AutoGrowInput value={String(r.overtime)} onChange={(v) => updateRow(idx, "overtime", v)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
+              ))}
+            </tr>
+            <tr>
+              <td style={labelStyle}>燃料費</td>
+              {chunk.map(({ r, idx }) => (
+                <td key={idx} style={{ ...cellStyle, textAlign: "right" }}>
+                  <AutoGrowInput value={String(r.transport)} onChange={(v) => updateRow(idx, "transport", v)} style={{ ...printFieldStyle, textAlign: "right" }} />
+                  {r.transports && r.transports.length > 0 && (
+                    <div style={{ fontSize: 7, color: "#666", textAlign: "right", padding: "0 3px", lineHeight: 1.3, wordBreak: "break-word" }}>
+                      {r.transports.map((t, ti) => (<div key={ti}>{t.memo || "移動"}：{yen(transportItemTotal(t))}</div>))}
+                    </div>
+                  )}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td style={labelStyle}>高速代</td>
+              {chunk.map(({ r, idx }) => (
+                <td key={idx} style={{ ...cellStyle, textAlign: "right" }}>
+                  <AutoGrowInput value={String(r.highway)} onChange={(v) => updateRow(idx, "highway", v)} style={{ ...printFieldStyle, textAlign: "right" }} />
+                  {r.highways && r.highways.length > 0 && (
+                    <div style={{ fontSize: 7, color: "#666", textAlign: "right", padding: "0 3px", lineHeight: 1.3, wordBreak: "break-word" }}>
+                      {r.highways.map((h, hi) => (<div key={hi}>{h.fromIC ? `${h.fromIC}IC〜${h.toIC}IC` : "高速代"}：{yen(highwayItemTotal(h))}</div>))}
+                    </div>
+                  )}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td style={labelStyle}>諸経費</td>
+              {chunk.map(({ r, idx }) => (
+                <td key={idx} style={{ ...cellStyle, textAlign: "right" }}>
+                  <AutoGrowInput value={String(r.miscExpense)} onChange={(v) => updateRow(idx, "miscExpense", v)} style={{ ...printFieldStyle, textAlign: "right" }} />
+                  {r.expenses && r.expenses.length > 0 && (
+                    <div style={{ fontSize: 7, color: "#666", textAlign: "right", padding: "0 3px", lineHeight: 1.3, wordBreak: "break-word" }}>
+                      {r.expenses.map((e, ei) => (<div key={ei}>{e.label}：{yen(e.amount)}</div>))}
+                    </div>
+                  )}
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td style={labelStyle}>税金</td>
+              {chunk.map(({ r, idx }) => (
+                <td key={idx} style={{ ...cellStyle, textAlign: "right" }}><AutoGrowInput value={String(r.tax)} onChange={(v) => updateRow(idx, "tax", v)} style={{ ...printFieldStyle, textAlign: "right" }} /></td>
+              ))}
+            </tr>
+            <tr>
+              <td style={{ ...labelStyle, background: "#F5F5F5" }}>金額</td>
+              {chunk.map(({ r, idx }) => (
+                <td key={idx} style={{ ...cellStyle, textAlign: "right" }}><AutoGrowInput value={String(r.total)} onChange={(v) => updateRow(idx, "total", v)} style={{ ...printFieldStyle, textAlign: "right", fontWeight: 700 }} /></td>
+              ))}
+            </tr>
+            {chunkIdx === chunks.length - 1 && (
+              <tr>
+                <td colSpan={chunk.length + 1} style={{ ...labelStyle, textAlign: "right", background: "#F5F5F5" }}>合計 {yen(displayTotal)}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      ))}
     </div>
   );
 }
@@ -2805,6 +2828,7 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
           .pdf-paper { position: absolute; top: 0; left: 0; width: 100% !important; max-width: none !important; box-shadow: none !important; margin: 0 !important; box-sizing: border-box; }
           .pdf-paper * { box-sizing: border-box; }
           table { table-layout: fixed !important; width: 100% !important; }
+          .pdf-page-break { page-break-before: always; break-before: page; }
           .no-print { display: none !important; }
           input, textarea { border-bottom: none !important; }
         }
