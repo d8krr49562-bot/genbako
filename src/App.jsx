@@ -9,7 +9,7 @@ const monthKey = (y, m) => `${y}-${pad(m)}`;
 const todayObj = new Date();
 
 const STORAGE_KEY = "invoice-app-data-v2";
-const APP_VERSION = "Ver 3.1"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
+const APP_VERSION = "Ver 3.2"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
 
 // ------------------- PDFを直接組み立てる仕組み(jsPDF)。ブラウザの印刷機能に頼らず、改ページを自分で完全に制御する -------------------
 const JP_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/mplus1p/MPLUS1p-Regular.ttf";
@@ -39,6 +39,7 @@ async function generateInvoicePdf({ year, month, editableRows, issuer, invoiceNu
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   doc.addFileToVFS("MPLUS1p-Regular.ttf", fontBase64);
   doc.addFont("MPLUS1p-Regular.ttf", "jp", "normal");
+  doc.addFont("MPLUS1p-Regular.ttf", "jp", "bold"); // 太字も同じフォントを割り当てる(登録しないと日本語非対応フォントに置き換わって文字化けする)
   doc.setFont("jp");
 
   const summaryItems = [
