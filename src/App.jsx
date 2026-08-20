@@ -9,7 +9,7 @@ const monthKey = (y, m) => `${y}-${pad(m)}`;
 const todayObj = new Date();
 
 const STORAGE_KEY = "invoice-app-data-v2";
-const APP_VERSION = "Ver 3.2"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
+const APP_VERSION = "Ver 3.3"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
 
 // ------------------- PDFを直接組み立てる仕組み(jsPDF)。ブラウザの印刷機能に頼らず、改ページを自分で完全に制御する -------------------
 const JP_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/mplus1p/MPLUS1p-Regular.ttf";
@@ -3017,7 +3017,22 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
       const doc = await generateInvoicePdf({
         year, month, editableRows, issuer, invoiceNumber, clientName, issueDate, bankInfo, note, displayTotal, pdfLayout,
       });
-      doc.save(`請求書_${year}年${month}月.pdf`);
+      const fileName = `請求書_${year}年${month}月.pdf`;
+      const blob = doc.output("blob");
+      const file = new File([blob], fileName, { type: "application/pdf" });
+
+      // 対応してる場合は、そのまま共有画面(LINEやメールに送る画面)を開く
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: fileName });
+          return;
+        } catch (shareErr) {
+          // 共有をキャンセルした場合などはダウンロードにフォールバックしない(何もしない)
+          if (shareErr && shareErr.name === "AbortError") return;
+        }
+      }
+      // 共有に対応してない場合はダウンロードする
+      doc.save(fileName);
     } catch (e) {
       console.error(e);
       setPdfError("PDFの作成に失敗しました。電波の良いところでもう一度お試しください。");
@@ -3039,7 +3054,7 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
           style={{ background: pdfGenerating ? "#8A7248" : "#F5A623", border: "none", borderRadius: 10, padding: "9px 16px", color: "#1C1F26", fontSize: 13, fontWeight: 800, cursor: pdfGenerating ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
         >
           {pdfGenerating && <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />}
-          {pdfGenerating ? "作成中…" : "PDFを作成する"}
+          {pdfGenerating ? "作成中…" : "PDFを作成して送る"}
         </button>
       </div>
       {pdfError && (
