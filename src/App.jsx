@@ -9,7 +9,7 @@ const monthKey = (y, m) => `${y}-${pad(m)}`;
 const todayObj = new Date();
 
 const STORAGE_KEY = "invoice-app-data-v2";
-const APP_VERSION = "Ver 3.3"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
+const APP_VERSION = "Ver 3.4"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
 
 // ------------------- PDFを直接組み立てる仕組み(jsPDF)。ブラウザの印刷機能に頼らず、改ページを自分で完全に制御する -------------------
 const JP_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/mplus1p/MPLUS1p-Regular.ttf";
@@ -3010,6 +3010,11 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
 
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [pdfError, setPdfError] = useState("");
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null); // 確認画面用のPDF(blob URL)
+  const [pdfFile, setPdfFile] = useState(null); // 送る時に使うFile
+  const [pdfFileName, setPdfFileName] = useState("");
+  const [pdfSharing, setPdfSharing] = useState(false);
+
   const handleGeneratePdf = async () => {
     setPdfGenerating(true);
     setPdfError("");
@@ -3019,25 +3024,46 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
       });
       const fileName = `請求書_${year}年${month}月.pdf`;
       const blob = doc.output("blob");
-      const file = new File([blob], fileName, { type: "application/pdf" });
-
-      // 対応してる場合は、そのまま共有画面(LINEやメールに送る画面)を開く
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({ files: [file], title: fileName });
-          return;
-        } catch (shareErr) {
-          // 共有をキャンセルした場合などはダウンロードにフォールバックしない(何もしない)
-          if (shareErr && shareErr.name === "AbortError") return;
-        }
-      }
-      // 共有に対応してない場合はダウンロードする
-      doc.save(fileName);
+      const url = URL.createObjectURL(blob);
+      setPdfFile(new File([blob], fileName, { type: "application/pdf" }));
+      setPdfFileName(fileName);
+      setPdfPreviewUrl(url); // ここで確認画面を開く(まだ送らない)
     } catch (e) {
       console.error(e);
       setPdfError("PDFの作成に失敗しました。電波の良いところでもう一度お試しください。");
     } finally {
       setPdfGenerating(false);
+    }
+  };
+
+  const closePdfPreview = () => {
+    if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+    setPdfPreviewUrl(null);
+    setPdfFile(null);
+  };
+
+  const handleSharePdf = async () => {
+    if (!pdfFile) return;
+    setPdfSharing(true);
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+        try {
+          await navigator.share({ files: [pdfFile], title: pdfFileName });
+        } catch (shareErr) {
+          if (!(shareErr && shareErr.name === "AbortError")) throw shareErr;
+        }
+      } else {
+        // 共有に対応してない場合はダウンロードする
+        const a = document.createElement("a");
+        a.href = pdfPreviewUrl;
+        a.download = pdfFileName;
+        a.click();
+      }
+    } catch (e) {
+      console.error(e);
+      setPdfError("送信に失敗しました。もう一度お試しください。");
+    } finally {
+      setPdfSharing(false);
     }
   };
 
@@ -3054,7 +3080,7 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
           style={{ background: pdfGenerating ? "#8A7248" : "#F5A623", border: "none", borderRadius: 10, padding: "9px 16px", color: "#1C1F26", fontSize: 13, fontWeight: 800, cursor: pdfGenerating ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
         >
           {pdfGenerating && <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />}
-          {pdfGenerating ? "作成中…" : "PDFを作成して送る"}
+          {pdfGenerating ? "作成中…" : "PDFを作成する"}
         </button>
       </div>
       {pdfError && (
@@ -3225,6 +3251,37 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
           input, textarea { border-bottom: none !important; }
         }
       `}</style>
+
+      {pdfPreviewUrl && (
+        <div style={{ position: "fixed", inset: 0, background: "#1C1F26", zIndex: 100, display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #333846" }}>
+            <button onClick={closePdfPreview} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, color: "#C7CBD4", fontSize: 13, fontWeight: 700 }}>
+              <ChevronLeft size={20} /> 戻る
+            </button>
+            <div style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>作成したPDFを確認</div>
+            <div style={{ width: 60 }} />
+          </div>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <iframe title="PDFプレビュー" src={pdfPreviewUrl} style={{ width: "100%", height: "100%", border: "none", background: "#fff" }} />
+          </div>
+          <div style={{ padding: "12px 16px", borderTop: "1px solid #333846", display: "flex", gap: 10 }}>
+            <button
+              onClick={closePdfPreview}
+              style={{ flex: 1, background: "#242832", border: "1px solid #444A58", borderRadius: 10, padding: "12px", color: "#C7CBD4", fontWeight: 700, fontSize: 14, cursor: "pointer" }}
+            >
+              修正しなおす
+            </button>
+            <button
+              onClick={handleSharePdf}
+              disabled={pdfSharing}
+              style={{ flex: 2, background: pdfSharing ? "#8A7248" : "#F5A623", border: "none", borderRadius: 10, padding: "12px", color: "#1C1F26", fontWeight: 800, fontSize: 14, cursor: pdfSharing ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+            >
+              {pdfSharing && <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />}
+              {pdfSharing ? "処理中…" : "この内容で送る"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
