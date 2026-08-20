@@ -8,7 +8,7 @@ const monthKey = (y, m) => `${y}-${pad(m)}`;
 const todayObj = new Date();
 
 const STORAGE_KEY = "invoice-app-data-v2";
-const APP_VERSION = "Ver 2.1"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
+const APP_VERSION = "Ver 2.2"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
 
 // 諸経費リストの合計金額
 const expensesTotal = (expenses) => (expenses || []).reduce((s, e) => s + Number(e.amount || 0), 0);
@@ -2541,9 +2541,9 @@ function PdfTableLandscape({ editableRows, updateRow, printFieldStyle, displayTo
   return (
     <div>
       {chunks.map((chunk, chunkIdx) => (
+        <div key={chunkIdx} className="pdf-page-break">
         <table
-          key={chunkIdx}
-          className="pdf-chunk pdf-page-break"
+          className="pdf-chunk"
           style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 9, marginBottom: 16 }}
         >
           <colgroup>
@@ -2647,6 +2647,7 @@ function PdfTableLandscape({ editableRows, updateRow, printFieldStyle, displayTo
             )}
           </tbody>
         </table>
+        </div>
       ))}
     </div>
   );
@@ -2851,7 +2852,7 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
           .pdf-paper { position: absolute; top: 0; left: 0; width: 100% !important; max-width: none !important; box-shadow: none !important; margin: 0 !important; box-sizing: border-box; }
           .pdf-paper * { box-sizing: border-box; }
           table { table-layout: fixed !important; width: 100% !important; }
-          .pdf-page-break { page-break-before: always; break-before: page; }
+          .pdf-page-break { display: block; page-break-before: always; break-before: page; }
           .pdf-chunk td { vertical-align: top !important; }
           .pdf-chunk thead { display: table-header-group; }
           .no-print { display: none !important; }
