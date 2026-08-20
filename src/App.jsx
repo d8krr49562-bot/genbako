@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { jsPDF } from "jspdf";
 import { Plus, ChevronLeft, ChevronRight, ChevronDown, X, Check, FileText, Pencil, Loader2, Trash2, Zap, Search, Settings } from "lucide-react";
 
 const yen = (n) => `¥${Number(n || 0).toLocaleString()}`;
@@ -8,7 +9,327 @@ const monthKey = (y, m) => `${y}-${pad(m)}`;
 const todayObj = new Date();
 
 const STORAGE_KEY = "invoice-app-data-v2";
-const APP_VERSION = "Ver 2.4"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
+const APP_VERSION = "Ver 3.1"; // ファイルを渡すたびに番号を上げていく(トムが更新を確認できるように)
+
+// ------------------- PDFを直接組み立てる仕組み(jsPDF)。ブラウザの印刷機能に頼らず、改ページを自分で完全に制御する -------------------
+const JP_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/mplus1p/MPLUS1p-Regular.ttf";
+let _jpFontBase64Cache = null;
+async function loadJapaneseFontBase64() {
+  if (_jpFontBase64Cache) return _jpFontBase64Cache;
+  const res = await fetch(JP_FONT_URL);
+  const buf = await res.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  _jpFontBase64Cache = btoa(binary);
+  return _jpFontBase64Cache;
+}
+
+const PDF_PAGE_W = 297; // A4横向き mm
+const PDF_PAGE_H = 210;
+const PDF_MARGIN = 12;
+const PDF_CONTENT_W = PDF_PAGE_W - PDF_MARGIN * 2;
+const PDF_CONTENT_BOTTOM = PDF_PAGE_H - PDF_MARGIN;
+
+async function generateInvoicePdf({ year, month, editableRows, issuer, invoiceNumber, clientName, issueDate, bankInfo, note, displayTotal, pdfLayout }) {
+  const fontBase64 = await loadJapaneseFontBase64();
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  doc.addFileToVFS("MPLUS1p-Regular.ttf", fontBase64);
+  doc.addFont("MPLUS1p-Regular.ttf", "jp", "normal");
+  doc.setFont("jp");
+
+  const summaryItems = [
+    ["人工合計一式", editableRows.reduce((s, r) => s + Number(r.ninku || 0), 0)],
+    ["残業代合計一式", editableRows.reduce((s, r) => s + Number(r.overtime || 0), 0)],
+    ["燃料費合計一式", editableRows.reduce((s, r) => s + Number(r.transport || 0), 0)],
+    ["高速代合計一式", editableRows.reduce((s, r) => s + Number(r.highway || 0), 0)],
+    ["諸経費合計一式", editableRows.reduce((s, r) => s + Number(r.miscExpense || 0), 0)],
+    ["税金合計一式", editableRows.reduce((s, r) => s + Number(r.tax || 0), 0)],
+  ];
+
+  // ---- 1ページ目: ヘッダー・請求額・内訳 ----
+  let y = PDF_MARGIN;
+  doc.setFontSize(20);
+  doc.text("請求書", PDF_PAGE_W / 2, y + 6, { align: "center" });
+  y += 18;
+
+  doc.setFontSize(12);
+  doc.text(clientName || "", PDF_MARGIN, y);
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text("御中", PDF_MARGIN, y + 6);
+  doc.setTextColor(0);
+
+  doc.setFontSize(9);
+  doc.text(issueDate || "", PDF_PAGE_W - PDF_MARGIN, y - 4, { align: "right" });
+  doc.text(issuer || "", PDF_PAGE_W - PDF_MARGIN, y + 2, { align: "right" });
+  if (invoiceNumber) {
+    doc.setFontSize(8);
+    doc.setTextColor(120);
+    doc.text(invoiceNumber, PDF_PAGE_W - PDF_MARGIN, y + 8, { align: "right" });
+    doc.setTextColor(0);
+  }
+  y += 18;
+
+  doc.setDrawColor(220);
+  doc.setFillColor(245, 245, 245);
+  doc.rect(PDF_MARGIN, y, PDF_CONTENT_W, 12, "FD");
+  doc.setFontSize(10);
+  doc.text(`${year}年${month}月分 ご請求額`, PDF_MARGIN + 4, y + 8);
+  doc.setFontSize(15);
+  doc.text(yen(displayTotal), PDF_PAGE_W - PDF_MARGIN - 4, y + 8.5, { align: "right" });
+  y += 20;
+
+  doc.setDrawColor(200);
+  doc.rect(PDF_MARGIN, y, PDF_CONTENT_W, 8 + summaryItems.length * 7);
+  doc.setFontSize(9);
+  doc.setTextColor(90);
+  doc.text("内訳（合計）", PDF_MARGIN + 4, y + 6);
+  doc.setTextColor(0);
+  let sy = y + 6;
+  summaryItems.forEach(([label, sum], i) => {
+    sy += 7;
+    doc.setFontSize(9);
+    doc.text(label, PDF_MARGIN + 4, sy);
+    doc.text(yen(sum), PDF_PAGE_W - PDF_MARGIN - 4, sy, { align: "right" });
+    if (i < summaryItems.length - 1) {
+      doc.setDrawColor(230);
+      doc.line(PDF_MARGIN + 4, sy + 2, PDF_PAGE_W - PDF_MARGIN - 4, sy + 2);
+    }
+  });
+
+  if (bankInfo || note) {
+    y = y + 8 + summaryItems.length * 7 + 10;
+    if (bankInfo) {
+      doc.setFontSize(8);
+      doc.setTextColor(120);
+      doc.text("振込先", PDF_MARGIN, y);
+      doc.setTextColor(0);
+      doc.setFontSize(9);
+      const lines = doc.splitTextToSize(bankInfo, PDF_CONTENT_W / 2 - 4);
+      doc.text(lines, PDF_MARGIN, y + 5);
+    }
+    if (note) {
+      doc.setFontSize(8);
+      doc.setTextColor(120);
+      doc.text("備考", PDF_MARGIN + PDF_CONTENT_W / 2, y);
+      doc.setTextColor(0);
+      doc.setFontSize(9);
+      const lines = doc.splitTextToSize(note, PDF_CONTENT_W / 2 - 4);
+      doc.text(lines, PDF_MARGIN + PDF_CONTENT_W / 2, y + 5);
+    }
+  }
+
+  // ---- 明細ページ ----
+  if (pdfLayout === "landscape") {
+    drawPdfLandscapeTable(doc, editableRows);
+  } else {
+    drawPdfPortraitTable(doc, editableRows, displayTotal);
+  }
+
+  // ---- 全ページにフッター(ページ番号)をつける ----
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setFontSize(7.5);
+    doc.setTextColor(150);
+    doc.text(`${p} / ${totalPages} ページ`, PDF_PAGE_W - PDF_MARGIN, PDF_PAGE_H - 6, { align: "right" });
+    doc.setTextColor(0);
+  }
+
+  return doc;
+}
+
+// 縦表示(日付が縦に並ぶ)のPDFページを描く
+function drawPdfPortraitTable(doc, rows, displayTotal) {
+  const cols = [
+    { key: "dateLabel", label: "日にち", w: 17 },
+    { key: "nameLabel", label: "名前", w: 19 },
+    { key: "siteLabel", label: "現場名", w: 38 },
+    { key: "addressLabel", label: "現場の住所", w: 43 },
+    { key: "ninku", label: "人工", w: 21, num: true },
+    { key: "overtime", label: "残業代", w: 21, num: true },
+    { key: "transport", label: "燃料費", w: 23, num: true, breakdown: "transports" },
+    { key: "highway", label: "高速代", w: 23, num: true, breakdown: "highways" },
+    { key: "miscExpense", label: "諸経費", w: 23, num: true, breakdown: "expenses" },
+    { key: "tax", label: "税金", w: 19, num: true },
+    { key: "total", label: "金額", w: 23, num: true, bold: true },
+  ];
+  const scale = PDF_CONTENT_W / cols.reduce((s, c) => s + c.w, 0);
+  cols.forEach((c) => (c.w = c.w * scale));
+  let colX = [];
+  let x = PDF_MARGIN;
+  cols.forEach((c) => { colX.push(x); x += c.w; });
+
+  doc.addPage();
+  let y = PDF_MARGIN;
+
+  const drawHeaderRow = () => {
+    doc.setFillColor(237, 237, 237);
+    doc.setDrawColor(200);
+    doc.rect(PDF_MARGIN, y, PDF_CONTENT_W, 8, "FD");
+    doc.setFontSize(8.5);
+    cols.forEach((c, i) => {
+      doc.text(c.label, colX[i] + 2, y + 5.5);
+    });
+    y += 8;
+  };
+  drawHeaderRow();
+
+  const breakdownText = (r, key) => {
+    const list = r[key];
+    if (!list || list.length === 0) return [];
+    return list.map((item) => {
+      if (key === "transports") return `${item.memo || "移動"}：${yen(transportItemTotal(item))}`;
+      if (key === "highways") return `${item.fromIC ? `${item.fromIC}IC〜${item.toIC}IC` : "高速代"}：${yen(highwayItemTotal(item))}`;
+      return `${item.label}：${yen(item.amount)}`;
+    });
+  };
+
+  rows.forEach((r) => {
+    // この行の高さを計算(折り返しがあれば伸ばす)
+    let maxLines = 1;
+    const cellLines = cols.map((c) => {
+      const raw = c.num ? yen(r[c.key]) : String(r[c.key] || "");
+      const lines = doc.splitTextToSize(raw, c.w - 4);
+      const extra = c.breakdown ? breakdownText(r, c.breakdown) : [];
+      const extraLines = extra.length ? doc.splitTextToSize(extra.join("\n"), c.w - 4) : [];
+      const total = lines.length + extraLines.length;
+      if (total > maxLines) maxLines = total;
+      return { lines, extraLines };
+    });
+    const rowH = Math.max(8, maxLines * 4 + 2);
+
+    if (y + rowH > PDF_CONTENT_BOTTOM) {
+      doc.addPage();
+      y = PDF_MARGIN;
+      drawHeaderRow();
+    }
+
+    doc.setDrawColor(210);
+    cols.forEach((c, i) => {
+      doc.rect(colX[i], y, c.w, rowH);
+      doc.setFontSize(8);
+      doc.setFont("jp", c.bold ? "bold" : "normal");
+      const { lines, extraLines } = cellLines[i];
+      let ly = y + 4;
+      lines.forEach((line) => {
+        doc.text(line, c.num ? colX[i] + c.w - 2 : colX[i] + 2, ly, { align: c.num ? "right" : "left" });
+        ly += 4;
+      });
+      if (extraLines.length) {
+        doc.setFontSize(6);
+        doc.setTextColor(130);
+        extraLines.forEach((line) => {
+          doc.text(line, colX[i] + c.w - 2, ly, { align: "right" });
+          ly += 3;
+        });
+        doc.setTextColor(0);
+      }
+      doc.setFont("jp", "normal");
+    });
+    y += rowH;
+  });
+
+  y += 2;
+  if (y + 8 > PDF_CONTENT_BOTTOM) { doc.addPage(); y = PDF_MARGIN; }
+  doc.setFillColor(245, 245, 245);
+  doc.setDrawColor(200);
+  doc.rect(PDF_MARGIN, y, PDF_CONTENT_W, 8, "FD");
+  doc.setFontSize(10);
+  doc.text(`合計　${yen(displayTotal)}`, PDF_PAGE_W - PDF_MARGIN - 3, y + 5.5, { align: "right" });
+}
+
+// 横表示(日付が横に並ぶ)のPDFページを描く
+function drawPdfLandscapeTable(doc, rows) {
+  const fieldRows = [
+    { key: "dateLabel", label: "日にち" },
+    { key: "nameLabel", label: "名前" },
+    { key: "siteLabel", label: "現場名" },
+    { key: "addressLabel", label: "現場の住所" },
+    { key: "ninku", label: "人工", num: true },
+    { key: "overtime", label: "残業代", num: true },
+    { key: "transport", label: "燃料費", num: true, breakdown: "transports" },
+    { key: "highway", label: "高速代", num: true, breakdown: "highways" },
+    { key: "miscExpense", label: "諸経費", num: true, breakdown: "expenses" },
+    { key: "tax", label: "税金", num: true },
+    { key: "total", label: "金額", num: true, bold: true },
+  ];
+  const CHUNK_SIZE = 5;
+  const labelW = 26;
+  const colW = (PDF_CONTENT_W - labelW) / CHUNK_SIZE;
+
+  const breakdownText = (r, key) => {
+    const list = r[key];
+    if (!list || list.length === 0) return [];
+    return list.map((item) => {
+      if (key === "transports") return `${item.memo || "移動"}：${yen(transportItemTotal(item))}`;
+      if (key === "highways") return `${item.fromIC ? `${item.fromIC}IC〜${item.toIC}IC` : "高速代"}：${yen(highwayItemTotal(item))}`;
+      return `${item.label}：${yen(item.amount)}`;
+    });
+  };
+
+  for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + CHUNK_SIZE);
+    doc.addPage();
+    let y = PDF_MARGIN;
+
+    fieldRows.forEach((fr) => {
+      // この段の高さを計算
+      let maxLines = 1;
+      const cellData = chunk.map((r) => {
+        const raw = fr.num ? yen(r[fr.key]) : String(r[fr.key] || "");
+        const lines = doc.splitTextToSize(raw, colW - 4);
+        const extra = fr.breakdown ? breakdownText(r, fr.breakdown) : [];
+        const extraLines = extra.length ? doc.splitTextToSize(extra.join("\n"), colW - 4) : [];
+        const total = lines.length + extraLines.length;
+        if (total > maxLines) maxLines = total;
+        return { lines, extraLines };
+      });
+      const rowH = Math.max(8, maxLines * 4 + 2);
+
+      if (y + rowH > PDF_CONTENT_BOTTOM) {
+        doc.addPage();
+        y = PDF_MARGIN;
+      }
+
+      doc.setDrawColor(210);
+      doc.setFillColor(237, 237, 237);
+      doc.rect(PDF_MARGIN, y, labelW, rowH, "FD");
+      doc.setFontSize(8.5);
+      doc.setFont("jp", "bold");
+      doc.text(fr.label, PDF_MARGIN + 2, y + 5);
+      doc.setFont("jp", "normal");
+
+      chunk.forEach((r, ci) => {
+        const cx = PDF_MARGIN + labelW + ci * colW;
+        doc.rect(cx, y, colW, rowH);
+        doc.setFontSize(8);
+        doc.setFont("jp", fr.bold ? "bold" : "normal");
+        const { lines, extraLines } = cellData[ci];
+        let ly = y + 4;
+        lines.forEach((line) => {
+          doc.text(line, fr.num ? cx + colW - 2 : cx + 2, ly, { align: fr.num ? "right" : "left" });
+          ly += 4;
+        });
+        if (extraLines.length) {
+          doc.setFontSize(6);
+          doc.setTextColor(130);
+          extraLines.forEach((line) => {
+            doc.text(line, cx + colW - 2, ly, { align: "right" });
+            ly += 3;
+          });
+          doc.setTextColor(0);
+        }
+        doc.setFont("jp", "normal");
+      });
+      y += rowH;
+    });
+  }
+}
 
 // 諸経費リストの合計金額
 const expensesTotal = (expenses) => (expenses || []).reduce((s, e) => s + Number(e.amount || 0), 0);
@@ -2541,7 +2862,7 @@ function PdfTableLandscape({ editableRows, updateRow, printFieldStyle, displayTo
   return (
     <div>
       {chunks.map((chunk, chunkIdx) => (
-        <div key={chunkIdx} className="pdf-page-break" style={{ minHeight: "186mm", boxSizing: "border-box" }}>
+        <div key={chunkIdx} className="pdf-page-break">
         <table
           className="pdf-chunk"
           style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 9, marginBottom: 16 }}
@@ -2686,6 +3007,24 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
 
   const printFieldStyle = { border: "none", borderBottom: "1px dashed #ccc", background: "transparent", fontSize: 11, padding: "2px 3px", width: "100%", boxSizing: "border-box", color: "#000", minWidth: 0 };
 
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [pdfError, setPdfError] = useState("");
+  const handleGeneratePdf = async () => {
+    setPdfGenerating(true);
+    setPdfError("");
+    try {
+      const doc = await generateInvoicePdf({
+        year, month, editableRows, issuer, invoiceNumber, clientName, issueDate, bankInfo, note, displayTotal, pdfLayout,
+      });
+      doc.save(`請求書_${year}年${month}月.pdf`);
+    } catch (e) {
+      console.error(e);
+      setPdfError("PDFの作成に失敗しました。電波の良いところでもう一度お試しください。");
+    } finally {
+      setPdfGenerating(false);
+    }
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: "#3A3D45", overflowX: "auto" }}>
       {/* 操作バー(印刷時は隠す) */}
@@ -2694,12 +3033,17 @@ function PdfPreview({ year, month, rows, grandTotal, companyLabel, profile, pdfL
           <ChevronLeft size={20} /> 戻って修正する
         </button>
         <button
-          onClick={() => window.print()}
-          style={{ background: "#F5A623", border: "none", borderRadius: 10, padding: "9px 16px", color: "#1C1F26", fontSize: 13, fontWeight: 800, cursor: "pointer" }}
+          onClick={handleGeneratePdf}
+          disabled={pdfGenerating}
+          style={{ background: pdfGenerating ? "#8A7248" : "#F5A623", border: "none", borderRadius: 10, padding: "9px 16px", color: "#1C1F26", fontSize: 13, fontWeight: 800, cursor: pdfGenerating ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6 }}
         >
-          印刷・PDF保存する
+          {pdfGenerating && <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />}
+          {pdfGenerating ? "作成中…" : "PDFを作成する"}
         </button>
       </div>
+      {pdfError && (
+        <p className="no-print" style={{ color: "#FF9B9B", fontSize: 12, textAlign: "center", padding: "8px 16px 0" }}>{pdfError}</p>
+      )}
       <p className="no-print" style={{ color: "#C7CBD4", fontSize: 11, textAlign: "center", padding: "8px 16px 0" }}>
         下の白い紙面が実際の印刷イメージです。文字はタップして直接修正できます。
       </p>
